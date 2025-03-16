@@ -296,6 +296,16 @@ func initCommands(
 				Meta: meta,
 			}, nil
 		},
+		"registry provider": func() (cli.Command, error) {
+			return &RegistryProviderCommand{
+				Meta: meta,
+			}, nil
+		},
+		"registry provider install": func() (cli.Command, error) {
+			return &RegistryProviderInstallCommand{
+				Meta: meta,
+			}, nil
+		},
 		"show": func() (cli.Command, error) {
 			return &command.ShowCommand{
 				Meta: meta,
