@@ -691,3 +691,160 @@ func (c *RegistryCachingClient) RefreshProviderCache(ctx context.Context, host s
 
 	return c.saveToCache(cache, registryType)
 }
+
+// CacheFilename returns the filename for a specific cache type
+func CacheFilename(cacheType string) string {
+	return cacheType
+}
+
+// ShouldRefreshCache checks if the cache file is older than maxAge
+func ShouldRefreshCache(cacheFile string, maxAge time.Duration) bool {
+	info, err := os.Stat(cacheFile)
+	if err != nil {
+		// If the file doesn't exist or can't be accessed, refresh the cache
+		return true
+	}
+	
+	// Check if the file is older than maxAge
+	return time.Since(info.ModTime()) > maxAge
+}
+
+// GetModulesFromCache retrieves modules from the cache for a given host
+func (c *RegistryCachingClient) GetModulesFromCache(host svchost.Hostname) ([]*response.Module, error) {
+	cacheFile := filepath.Join(c.cacheDir, fmt.Sprintf("modules_%s.json", host.String()))
+	
+	data, err := os.ReadFile(cacheFile)
+	if err != nil {
+		return nil, &RegistryCachingError{err: fmt.Errorf("failed to read module cache file: %w", err)}
+	}
+	
+	var cache RegistryCache
+	if err := json.Unmarshal(data, &cache); err != nil {
+		return nil, &RegistryCachingError{err: fmt.Errorf("failed to unmarshal module cache: %w", err)}
+	}
+	
+	return cache.Modules, nil
+}
+
+// GetProvidersFromCache retrieves providers from the cache for a given host
+func (c *RegistryCachingClient) GetProvidersFromCache(host svchost.Hostname) ([]*response.ModuleProvider, error) {
+	cacheFile := filepath.Join(c.cacheDir, fmt.Sprintf("providers_%s.json", host.String()))
+	
+	data, err := os.ReadFile(cacheFile)
+	if err != nil {
+		return nil, &RegistryCachingError{err: fmt.Errorf("failed to read provider cache file: %w", err)}
+	}
+	
+	var cache RegistryCache
+	if err := json.Unmarshal(data, &cache); err != nil {
+		return nil, &RegistryCachingError{err: fmt.Errorf("failed to unmarshal provider cache: %w", err)}
+	}
+	
+	return cache.Providers, nil
+}
+
+// RefreshModules refreshes the module cache for a given host
+func (c *Client) RefreshModules(ctx context.Context, host string) error {
+	hostname, err := svchost.ForComparison(host)
+	if err != nil {
+		return err
+	}
+	
+	// Create a caching client
+	cachingClient, err := NewRegistryCachingClient(c, os.TempDir(), hclog.New(&hclog.LoggerOptions{
+		Name:   "registry-cache",
+		Level:  hclog.Info,
+		Output: os.Stderr,
+	}))
+	if err != nil {
+		return err
+	}
+	
+	// Refresh the module cache
+	return cachingClient.RefreshModuleCache(ctx, hostname)
+}
+
+// RefreshProviders refreshes the provider cache for a given host
+func (c *Client) RefreshProviders(ctx context.Context, host string) error {
+	hostname, err := svchost.ForComparison(host)
+	if err != nil {
+		return err
+	}
+	
+	// Create a caching client
+	cachingClient, err := NewRegistryCachingClient(c, os.TempDir(), hclog.New(&hclog.LoggerOptions{
+		Name:   "registry-cache",
+		Level:  hclog.Info,
+		Output: os.Stderr,
+	}))
+	if err != nil {
+		return err
+	}
+	
+	// Refresh the provider cache
+	return cachingClient.RefreshProviderCache(ctx, hostname)
+}
+
+// GetModules retrieves modules from the cache for a given host
+func (c *Client) GetModules(ctx context.Context, host string) ([]*response.Module, error) {
+	hostname, err := svchost.ForComparison(host)
+	if err != nil {
+		return nil, err
+	}
+	
+	// Create a caching client
+	cachingClient, err := NewRegistryCachingClient(c, os.TempDir(), hclog.New(&hclog.LoggerOptions{
+		Name:   "registry-cache",
+		Level:  hclog.Info,
+		Output: os.Stderr,
+	}))
+	if err != nil {
+		return nil, err
+	}
+	
+	// Get modules from the cache
+	modules, err := cachingClient.GetModulesFromCache(hostname)
+	if err != nil {
+		// If there's an error getting modules from the cache, try refreshing
+		if err := cachingClient.RefreshModuleCache(ctx, hostname); err != nil {
+			return nil, err
+		}
+		
+		// Try again after refreshing
+		return cachingClient.GetModulesFromCache(hostname)
+	}
+	
+	return modules, nil
+}
+
+// GetProviders retrieves providers from the cache for a given host
+func (c *Client) GetProviders(ctx context.Context, host string) ([]*response.ModuleProvider, error) {
+	hostname, err := svchost.ForComparison(host)
+	if err != nil {
+		return nil, err
+	}
+	
+	// Create a caching client
+	cachingClient, err := NewRegistryCachingClient(c, os.TempDir(), hclog.New(&hclog.LoggerOptions{
+		Name:   "registry-cache",
+		Level:  hclog.Info,
+		Output: os.Stderr,
+	}))
+	if err != nil {
+		return nil, err
+	}
+	
+	// Get providers from the cache
+	providers, err := cachingClient.GetProvidersFromCache(hostname)
+	if err != nil {
+		// If there's an error getting providers from the cache, try refreshing
+		if err := cachingClient.RefreshProviderCache(ctx, hostname); err != nil {
+			return nil, err
+		}
+		
+		// Try again after refreshing
+		return cachingClient.GetProvidersFromCache(hostname)
+	}
+	
+	return providers, nil
+}
