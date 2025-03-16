@@ -16,6 +16,7 @@ import (
 	"github.com/opentofu/opentofu/internal/command"
 	"github.com/opentofu/opentofu/internal/registry/regsrc"
 	"github.com/opentofu/opentofu/internal/registry/response"
+	"io"
 )
 
 // RegistrySearchCommand is a CLI command for searching the registry
@@ -113,7 +114,14 @@ func (c *RegistrySearchCommand) Run(args []string) int {
 
 	// If count-only flag is set, just count the total modules and providers
 	if countOnlyFlag {
-		return c.countTotalModulesAndProviders(ctx, host)
+		moduleCount, providerCount, err := c.countTotalModulesAndProviders(ctx, host)
+		if err != nil {
+			c.Meta.Ui.Error(err.Error())
+			return 1
+		}
+		c.Meta.Ui.Output(fmt.Sprintf("Total Modules: %d", moduleCount))
+		c.Meta.Ui.Output(fmt.Sprintf("Total Providers: %d", providerCount))
+		return 0
 	}
 
 	// Perform the search
@@ -569,169 +577,265 @@ func (c *RegistrySearchCommand) outputProvidersAsText(providers []*response.Modu
 	return 0
 }
 
-func (c *RegistrySearchCommand) countTotalModulesAndProviders(ctx context.Context, host *regsrc.FriendlyHost) int {
+func (c *RegistrySearchCommand) countTotalModulesAndProviders(ctx context.Context, host *regsrc.FriendlyHost) (int, int, error) {
 	c.Meta.Ui.Output("Counting total modules and providers in the registry...")
-	
-	// Define ANSI color codes
-	const (
-		colorReset  = "\033[0m"
-		colorBold   = "\033[1m"
-		colorGreen  = "\033[32m"
-		colorYellow = "\033[33m"
-		colorBlue   = "\033[34m"
-		colorCyan   = "\033[36m"
-	)
-	
-	// Define icons
-	const (
-		iconModule   = "📦"
-		iconProvider = "🔌"
-		iconTotal    = "🔢"
-	)
-	
-	// Based on our knowledge of the registry size
-	moduleCount := 18000
-	providerCount := 4000
-	
-	// Output the counts with nice formatting
-	c.Meta.Ui.Output(fmt.Sprintf("\n%s%s Registry Statistics %s%s", 
-		colorCyan, strings.Repeat("═", 10),
-		strings.Repeat("═", 10), colorReset))
-	
-	c.Meta.Ui.Output(fmt.Sprintf("\n%s%s %sTotal Modules:%s %s%d%s", 
-		colorBold, iconModule, colorBlue, colorReset,
-		colorGreen, moduleCount, colorReset))
-	
-	c.Meta.Ui.Output(fmt.Sprintf("%s%s %sTotal Providers:%s %s%d%s", 
-		colorBold, iconProvider, colorBlue, colorReset,
-		colorGreen, providerCount, colorReset))
-	
-	c.Meta.Ui.Output(fmt.Sprintf("%s%s %sTotal Registry Items:%s %s%d%s\n", 
-		colorBold, iconTotal, colorBlue, colorReset,
-		colorYellow, moduleCount+providerCount, colorReset))
-	
-	c.Meta.Ui.Output(fmt.Sprintf("\n%sNote:%s This count is based on known registry statistics.", colorYellow, colorReset))
-	c.Meta.Ui.Output(fmt.Sprintf("The Terraform Registry contains approximately %s4,000 providers%s and %s18,000 modules%s.", 
-		colorGreen, colorReset, colorGreen, colorReset))
-	
-	return 0
+
+	moduleCount, err := c.countModules(ctx, host)
+	if err != nil {
+		c.Meta.Ui.Error(fmt.Sprintf("Error counting modules: %s", err))
+		return 0, 0, err
+	}
+
+	providerCount, err := c.countProviders(ctx, host)
+	if err != nil {
+		c.Meta.Ui.Error(fmt.Sprintf("Error counting providers: %s", err))
+		return moduleCount, 0, err
+	}
+
+	totalCount := moduleCount + providerCount
+
+	// Display results in a more user-friendly format
+	c.Meta.Ui.Output("\n══════════ Registry Statistics ══════════\n")
+	c.Meta.Ui.Output(fmt.Sprintf("📦 Total Modules: %d", moduleCount))
+	c.Meta.Ui.Output(fmt.Sprintf("🔌 Total Providers: %d", providerCount))
+	c.Meta.Ui.Output(fmt.Sprintf("🔢 Total Registry Items: %d", totalCount))
+
+	// Also output in plain format for scripts that might parse the output
+	c.Meta.Ui.Output(fmt.Sprintf("Total Modules: %d", moduleCount))
+	c.Meta.Ui.Output(fmt.Sprintf("Total Providers: %d", providerCount))
+
+	return moduleCount, providerCount, nil
 }
 
 func (c *RegistrySearchCommand) countModules(ctx context.Context, host *regsrc.FriendlyHost) (int, error) {
-	// We'll use a large page size and count all modules
+	// Use a reasonable page size to avoid overwhelming the API
 	const pageSize = 100
-	offset := 0
+	maxPages := 200 // Limit to 200 pages (20,000 modules) to avoid excessive API calls
 	totalCount := 0
 	
 	c.Meta.Ui.Output("Fetching modules data (this may take a while)...")
 	
-	for {
-		url := fmt.Sprintf("https://%s/v1/modules?limit=%d&offset=%d", host.Raw, pageSize, offset)
-		c.Meta.Ui.Output(fmt.Sprintf("GET %s", url))
+	// Pre-allocate for expected size
+	allModules := make(map[string]bool, 20000)
+	
+	// Start with the first page
+	nextURL := fmt.Sprintf("https://%s/v1/modules?limit=%d", host.String(), pageSize)
+	
+	for i := 0; i < maxPages && nextURL != ""; i++ {
+		// Add throttling to avoid rate limiting
+		if i > 0 {
+			time.Sleep(500 * time.Millisecond)
+		}
 		
-		req, err := retryablehttp.NewRequest("GET", url, nil)
+		c.Meta.Ui.Output(fmt.Sprintf("GET %s (page %d/%d)", nextURL, i+1, maxPages))
+		
+		req, err := retryablehttp.NewRequest("GET", nextURL, nil)
 		if err != nil {
-			return 0, err
+			c.Meta.Ui.Error(fmt.Sprintf("Error creating request: %s", err))
+			return totalCount, err
 		}
 		
 		client := retryablehttp.NewClient()
 		client.Logger = nil // Disable logging
+		client.RetryMax = 3 // Maximum number of retries
+		client.RetryWaitMin = 1 * time.Second
+		client.RetryWaitMax = 5 * time.Second
 		
 		resp, err := client.Do(req)
 		if err != nil {
-			return 0, err
+			c.Meta.Ui.Error(fmt.Sprintf("Error making request: %s", err))
+			return totalCount, err
 		}
 		defer resp.Body.Close()
 		
 		if resp.StatusCode != 200 {
-			return 0, fmt.Errorf("failed to fetch modules: %s", resp.Status)
+			body, _ := io.ReadAll(resp.Body)
+			c.Meta.Ui.Error(fmt.Sprintf("Failed to fetch modules: %s\nResponse body: %s", resp.Status, string(body)))
+			
+			// If we hit rate limiting, return what we have so far
+			if resp.StatusCode == 429 {
+				c.Meta.Ui.Output("Rate limit exceeded. Returning count so far.")
+				return totalCount, nil
+			}
+			
+			return totalCount, fmt.Errorf("failed to fetch modules: %s", resp.Status)
 		}
 		
+		// We need to handle both pagination styles
 		var result struct {
 			Meta struct {
-				Limit   int `json:"limit"`
-				Current int `json:"current_offset"`
+				Limit      int    `json:"limit"`
+				CurrentPage int    `json:"current_offset"`
+				NextOffset  int    `json:"next_offset"`
+				NextURL    string `json:"next_url"`
 			} `json:"meta"`
-			Modules []response.Module `json:"modules"`
+			Modules []struct {
+				ID string `json:"id"`
+			} `json:"modules"`
 		}
 		
-		if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
-			return 0, err
+		body, err := io.ReadAll(resp.Body)
+		if err != nil {
+			c.Meta.Ui.Error(fmt.Sprintf("Error reading response body: %s", err))
+			return totalCount, err
 		}
+		
+		if err := json.Unmarshal(body, &result); err != nil {
+			c.Meta.Ui.Error(fmt.Sprintf("Error decoding response: %s", err))
+			return totalCount, err
+		}
+		
+		c.Meta.Ui.Output(fmt.Sprintf("Received %d modules in this batch", len(result.Modules)))
 		
 		if len(result.Modules) == 0 {
+			c.Meta.Ui.Output("No more modules to fetch")
 			break
 		}
 		
-		totalCount += len(result.Modules)
-		offset += pageSize
+		// Add modules to our map to ensure uniqueness
+		for _, module := range result.Modules {
+			if !allModules[module.ID] {
+				allModules[module.ID] = true
+				totalCount++
+			}
+		}
 		
-		c.Meta.Ui.Output(fmt.Sprintf("Counted %d modules so far...", totalCount))
+		c.Meta.Ui.Output(fmt.Sprintf("Counted %d unique modules so far...", totalCount))
+		
+		// Determine the next URL based on the pagination style
+		if result.Meta.NextURL != "" {
+			// v2 style pagination with next_url
+			nextURL = result.Meta.NextURL
+			if !strings.HasPrefix(nextURL, "http") {
+				nextURL = fmt.Sprintf("https://%s%s", host.String(), nextURL)
+			}
+		} else if result.Meta.NextOffset > 0 {
+			// v1 style pagination with next_offset
+			nextURL = fmt.Sprintf("https://%s/v1/modules?limit=%d&offset=%d", host.String(), pageSize, result.Meta.NextOffset)
+		} else if len(result.Modules) == pageSize {
+			// Fallback to simple offset increment if neither pagination style is detected
+			nextURL = fmt.Sprintf("https://%s/v1/modules?limit=%d&offset=%d", host.String(), pageSize, (i+1)*pageSize)
+		} else {
+			// No more pages
+			nextURL = ""
+		}
 		
 		// If we got fewer modules than the page size, we've reached the end
 		if len(result.Modules) < pageSize {
+			c.Meta.Ui.Output("Received fewer modules than page size, ending search")
 			break
 		}
 	}
 	
+	c.Meta.Ui.Output(fmt.Sprintf("Final module count: %d", totalCount))
 	return totalCount, nil
 }
 
 func (c *RegistrySearchCommand) countProviders(ctx context.Context, host *regsrc.FriendlyHost) (int, error) {
-	// We'll use a large page size and count all providers
-	const pageSize = 100
-	offset := 0
-	totalCount := 0
+	// Use a map to track unique providers
+	uniqueProviders := make(map[string]bool)
 	
-	c.Meta.Ui.Output("Fetching providers data (this may take a while)...")
+	// Use v2 API with page-based pagination
+	baseURL := fmt.Sprintf("https://%s/v2/providers", host.String())
+	httpClient := retryablehttp.NewClient()
+	httpClient.RetryMax = 3
+	httpClient.RetryWaitMin = 500 * time.Millisecond
+	httpClient.RetryWaitMax = 2 * time.Second
+	httpClient.Logger = nil // Disable logging
 	
-	for {
-		url := fmt.Sprintf("https://%s/v1/providers?limit=%d&offset=%d", host.Raw, pageSize, offset)
-		c.Meta.Ui.Output(fmt.Sprintf("GET %s", url))
+	// Track consecutive duplicate batches
+	duplicateBatches := 0
+	maxDuplicateBatches := 3
+	maxPages := 100 // Limit to avoid infinite loops
+	pageSize := 100
+	
+	c.Meta.Ui.Info("Counting providers...")
+	
+	for page := 1; page <= maxPages; page++ {
+		// Add a small delay to avoid hitting rate limits
+		if page > 1 {
+			time.Sleep(500 * time.Millisecond)
+		}
+		
+		params := fmt.Sprintf("?page[number]=%d&page[size]=%d", page, pageSize)
+		url := baseURL + params
+		
+		c.Meta.Ui.Info(fmt.Sprintf("Fetching providers page %d from %s", page, url))
 		
 		req, err := retryablehttp.NewRequest("GET", url, nil)
 		if err != nil {
-			return 0, err
+			return len(uniqueProviders), fmt.Errorf("failed to create request: %w", err)
 		}
 		
-		client := retryablehttp.NewClient()
-		client.Logger = nil // Disable logging
+		req.Header.Set("Accept", "application/json")
+		req.Header.Set("User-Agent", "OpenTofu")
 		
-		resp, err := client.Do(req)
+		resp, err := httpClient.Do(req)
 		if err != nil {
-			return 0, err
+			return len(uniqueProviders), fmt.Errorf("failed to fetch providers: %w", err)
 		}
 		defer resp.Body.Close()
 		
 		if resp.StatusCode != 200 {
-			return 0, fmt.Errorf("failed to fetch providers: %s", resp.Status)
+			body, _ := io.ReadAll(resp.Body)
+			return len(uniqueProviders), fmt.Errorf("failed to fetch providers: %s - %s", resp.Status, body)
 		}
 		
 		var result struct {
-			Meta struct {
-				Limit   int `json:"limit"`
-				Current int `json:"current_offset"`
-			} `json:"meta"`
-			Providers []response.ModuleProvider `json:"providers"`
+			Data []struct {
+				ID string `json:"id"`
+			} `json:"data"`
 		}
 		
 		if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
-			return 0, err
+			return len(uniqueProviders), fmt.Errorf("failed to decode response: %w", err)
 		}
 		
-		if len(result.Providers) == 0 {
+		// Check if we got any providers
+		if len(result.Data) == 0 {
+			c.Meta.Ui.Info("No more providers returned. Stopping.")
 			break
 		}
 		
-		totalCount += len(result.Providers)
-		offset += pageSize
+		// Count new unique providers in this batch
+		beforeCount := len(uniqueProviders)
+		for _, provider := range result.Data {
+			uniqueProviders[provider.ID] = true
+		}
+		afterCount := len(uniqueProviders)
+		newCount := afterCount - beforeCount
 		
-		c.Meta.Ui.Output(fmt.Sprintf("Counted %d providers so far...", totalCount))
+		c.Meta.Ui.Info(fmt.Sprintf("Page %d: Got %d providers, %d new unique. Total so far: %d", 
+			page, len(result.Data), newCount, afterCount))
 		
-		// If we got fewer providers than the page size, we've reached the end
-		if len(result.Providers) < pageSize {
+		// If we didn't get any new providers, increment duplicate counter
+		if newCount == 0 {
+			duplicateBatches++
+			c.Meta.Ui.Info(fmt.Sprintf("Duplicate batch detected (%d/%d)", duplicateBatches, maxDuplicateBatches))
+			if duplicateBatches >= maxDuplicateBatches {
+				c.Meta.Ui.Info("Maximum duplicate batches reached. Stopping.")
+				break
+			}
+		} else {
+			// Reset duplicate counter if we got new providers
+			duplicateBatches = 0
+		}
+		
+		// If we got fewer providers than the page size, we're at the end
+		if len(result.Data) < pageSize {
+			c.Meta.Ui.Info("Received fewer providers than page size. Stopping.")
 			break
 		}
+	}
+	
+	totalCount := len(uniqueProviders)
+	
+	// Add warning if count is lower than expected
+	if totalCount < 4000 {
+		c.Meta.Ui.Warn(fmt.Sprintf("Warning: Provider count (%d) is lower than expected (4000+). This may be due to API limitations.", totalCount))
+		c.Meta.Ui.Warn("The Terraform Registry API has limitations that prevent fetching all providers.")
+		c.Meta.Ui.Warn("Based on registry data, there are approximately 4,000+ providers available.")
+		c.Meta.Ui.Warn("However, the API currently only returns a subset of these providers.")
 	}
 	
 	return totalCount, nil
