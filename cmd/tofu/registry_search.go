@@ -526,14 +526,15 @@ func (c *RegistrySearchCommand) outputProvidersAsText(providers []*response.Modu
 
 	// Define ANSI color codes
 	const (
-		colorReset  = "\033[0m"
-		colorBold   = "\033[1m"
-		colorGreen  = "\033[32m"
-		colorYellow = "\033[33m"
-		colorBlue   = "\033[34m"
+		colorReset   = "\033[0m"
+		colorBold    = "\033[1m"
+		colorGreen   = "\033[32m"
+		colorYellow  = "\033[33m"
+		colorBlue    = "\033[34m"
 		colorMagenta = "\033[35m"
-		colorCyan   = "\033[36m"
-		colorGray   = "\033[90m"
+		colorCyan    = "\033[36m"
+		colorGray    = "\033[90m"
+		colorItalic  = "\033[3m"
 	)
 
 	// Define icons
@@ -543,6 +544,10 @@ func (c *RegistrySearchCommand) outputProvidersAsText(providers []*response.Modu
 		iconModules   = "📦"
 		iconNamespace = "🏢"
 		iconSeparator = "━━━"
+		iconVersion   = "🏷️ "
+		iconSource    = "🔗"
+		iconUpdated   = "🔄"
+		iconCopy      = "📋"
 	)
 
 	// Create a header with count and formatting
@@ -557,14 +562,76 @@ func (c *RegistrySearchCommand) outputProvidersAsText(providers []*response.Modu
 		return providers[i].Downloads > providers[j].Downloads
 	})
 
+	// Map of known provider namespaces
+	knownProviders := map[string]string{
+		"aws":        "hashicorp/aws",
+		"google":     "hashicorp/google",
+		"azurerm":    "hashicorp/azurerm",
+		"kubernetes": "hashicorp/kubernetes",
+		"helm":       "hashicorp/helm",
+		"null":       "hashicorp/null",
+		"random":     "hashicorp/random",
+		"template":   "hashicorp/template",
+		"local":      "hashicorp/local",
+		"tls":        "hashicorp/tls",
+		"http":       "hashicorp/http",
+		"archive":    "hashicorp/archive",
+		"external":   "hashicorp/external",
+		"time":       "hashicorp/time",
+		"docker":     "kreuzwerker/docker",
+		"github":     "integrations/github",
+		"gitlab":     "gitlabhq/gitlab",
+		"postgresql": "cyrilgdn/postgresql",
+		"mysql":      "petoju/mysql",
+		"vault":      "hashicorp/vault",
+		"consul":     "hashicorp/consul",
+		"nomad":      "hashicorp/nomad",
+		"boundary":   "hashicorp/boundary",
+		"waypoint":   "hashicorp/waypoint",
+	}
+
 	for i, provider := range providers {
 		// Parse provider name to extract namespace and type if possible
 		parts := strings.Split(provider.Name, "/")
 		displayName := provider.Name
+		namespace := ""
+		providerType := displayName
+		
+		// Determine the full provider source string
+		var fullProviderSource string
+		
+		if len(parts) > 1 {
+			// If the name already includes a namespace
+			namespace = parts[0]
+			providerType = parts[len(parts)-1]
+			fullProviderSource = fmt.Sprintf("registry.opentofu.org/%s/%s", namespace, providerType)
+		} else if knownNamespace, exists := knownProviders[provider.Name]; exists {
+			// If it's a known provider, use the known namespace
+			fullProviderSource = fmt.Sprintf("registry.opentofu.org/%s", knownNamespace)
+			parts := strings.Split(knownNamespace, "/")
+			namespace = parts[0]
+			providerType = parts[1]
+		} else {
+			// Default to hashicorp namespace for unknown providers
+			fullProviderSource = fmt.Sprintf("registry.opentofu.org/hashicorp/%s", provider.Name)
+			namespace = "hashicorp"
+			providerType = provider.Name
+		}
 		
 		// Create a visually distinct provider entry with index
-		c.Meta.Ui.Output(fmt.Sprintf("%d. %s%s %s%s%s", 
-			i+1, colorBold, iconProvider, colorBlue, displayName, colorReset))
+		if namespace != "" {
+			c.Meta.Ui.Output(fmt.Sprintf("%d. %s%s %s%s/%s%s", 
+				i+1, colorBold, iconProvider, 
+				colorBlue, namespace, providerType, colorReset))
+		} else {
+			c.Meta.Ui.Output(fmt.Sprintf("%d. %s%s %s%s%s", 
+				i+1, colorBold, iconProvider, 
+				colorBlue, displayName, colorReset))
+		}
+		
+		// Always show the full provider source string
+		c.Meta.Ui.Output(fmt.Sprintf("   %s %s%s%s", 
+			iconCopy, colorGreen, fullProviderSource, colorReset))
 		
 		// Show basic stats in a compact format
 		downloadStr := fmt.Sprintf("%d", provider.Downloads)
@@ -590,18 +657,40 @@ func (c *RegistrySearchCommand) outputProvidersAsText(providers []*response.Modu
 			stats = append(stats, moduleCountStr)
 		}
 		
-		// If we have namespace information, display it
-		if len(parts) > 1 {
-			stats = append(stats, fmt.Sprintf("%s %s%s%s", 
-				iconNamespace, colorGreen, parts[0], colorReset))
-		}
-		
 		c.Meta.Ui.Output(fmt.Sprintf("   %s", strings.Join(stats, " | ")))
 		
 		// Show additional details if requested
 		if detailed {
 			c.Meta.Ui.Output("")
-			// Add any additional provider details here if they become available in the API
+			
+			// Add usage example with the actual provider information
+			c.Meta.Ui.Output(fmt.Sprintf("   %sUsage example:%s", colorBold, colorReset))
+			c.Meta.Ui.Output(fmt.Sprintf("   %sterraform {%s", colorGreen, colorReset))
+			c.Meta.Ui.Output(fmt.Sprintf("     %srequired_providers {%s", colorGreen, colorReset))
+			
+			if namespace != "" && providerType != "" {
+				c.Meta.Ui.Output(fmt.Sprintf("       %s%s = {%s", colorGreen, providerType, colorReset))
+				c.Meta.Ui.Output(fmt.Sprintf("         %ssource  = \"%s\"%s", 
+					colorGreen, fullProviderSource, colorReset))
+				c.Meta.Ui.Output(fmt.Sprintf("         %sversion = \">= 0.1.0\"%s", 
+					colorGreen, colorReset))
+			} else {
+				c.Meta.Ui.Output(fmt.Sprintf("       %s<name> = {%s", colorGreen, colorReset))
+				c.Meta.Ui.Output(fmt.Sprintf("         %ssource  = \"%s\"%s", 
+					colorGreen, fullProviderSource, colorReset))
+				c.Meta.Ui.Output(fmt.Sprintf("         %sversion = \">= 0.1.0\"%s", 
+					colorGreen, colorReset))
+			}
+			
+			c.Meta.Ui.Output(fmt.Sprintf("       %s}%s", colorGreen, colorReset))
+			c.Meta.Ui.Output(fmt.Sprintf("     %s}%s", colorGreen, colorReset))
+			c.Meta.Ui.Output(fmt.Sprintf("   %s}%s", colorGreen, colorReset))
+			
+			// Add install command example
+			c.Meta.Ui.Output("")
+			c.Meta.Ui.Output(fmt.Sprintf("   %sInstall command:%s", colorBold, colorReset))
+			c.Meta.Ui.Output(fmt.Sprintf("   %stofu registry provider install %s%s", 
+				colorGreen, fullProviderSource, colorReset))
 		}
 		
 		// Add separator between providers
@@ -617,11 +706,14 @@ func (c *RegistrySearchCommand) outputProvidersAsText(providers []*response.Modu
 	c.Meta.Ui.Output(fmt.Sprintf("  %sterraform {%s", colorGreen, colorReset))
 	c.Meta.Ui.Output(fmt.Sprintf("  %s  required_providers {%s", colorGreen, colorReset))
 	c.Meta.Ui.Output(fmt.Sprintf("  %s    <name> = {%s", colorGreen, colorReset))
-	c.Meta.Ui.Output(fmt.Sprintf("  %s      source = \"<provider-address>\"%s", colorGreen, colorReset))
+	c.Meta.Ui.Output(fmt.Sprintf("  %s      source = \"<full-provider-source>\"%s", colorGreen, colorReset))
+	c.Meta.Ui.Output(fmt.Sprintf("  %s      version = \">= 0.1.0\"%s", colorGreen, colorReset))
 	c.Meta.Ui.Output(fmt.Sprintf("  %s    }%s", colorGreen, colorReset))
 	c.Meta.Ui.Output(fmt.Sprintf("  %s  }%s", colorGreen, colorReset))
 	c.Meta.Ui.Output(fmt.Sprintf("  %s}%s", colorGreen, colorReset))
 	c.Meta.Ui.Output(fmt.Sprintf("For more details, use the %s-detailed%s flag", colorYellow, colorReset))
+	c.Meta.Ui.Output(fmt.Sprintf("To install a provider, run: %stofu registry provider install <full-provider-source>%s", 
+		colorGreen, colorReset))
 
 	return 0
 }
