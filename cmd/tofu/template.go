@@ -33,7 +33,7 @@ Usage: tofu template [options] PROVIDER/RESOURCE
 
 Options:
 
-  -db=TYPE     Database type to use (sqlite or postgres). Default: sqlite
+  -db=TYPE     Database type to use (sqlite or postgres). Default: postgres
   -load        Load templates into the database
 `
 	return strings.TrimSpace(helpText)
@@ -47,12 +47,31 @@ func (c *TemplateCommand) Run(args []string) int {
 	// Parse command-line flags
 	cmdFlags := flag.NewFlagSet("template", flag.ContinueOnError)
 	cmdFlags.Usage = func() { c.Meta.Ui.Error(c.Help()) }
-	dbTypeFlag := cmdFlags.String("db", "sqlite", "Database type: sqlite or postgres")
+	dbTypeFlag := cmdFlags.String("db", "postgres", "Database type: sqlite or postgres")
 	loadFlag := cmdFlags.Bool("load", false, "Load templates into the database")
 	
 	if err := cmdFlags.Parse(args); err != nil {
 		c.Meta.Ui.Error(fmt.Sprintf("Error parsing command-line flags: %s", err))
 		return 1
+	}
+
+	// Load environment variables from .env file if it exists
+	envFile := ".env"
+	if _, err := os.Stat(envFile); err == nil {
+		envContent, err := os.ReadFile(envFile)
+		if err == nil {
+			lines := strings.Split(string(envContent), "\n")
+			for _, line := range lines {
+				line = strings.TrimSpace(line)
+				if line == "" || strings.HasPrefix(line, "#") {
+					continue
+				}
+				parts := strings.SplitN(line, "=", 2)
+				if len(parts) == 2 {
+					os.Setenv(parts[0], parts[1])
+				}
+			}
+		}
 	}
 
 	// If the load flag is set, load templates into the database
@@ -72,7 +91,23 @@ func (c *TemplateCommand) Run(args []string) int {
 		err := templates.LoadTemplates(*dbTypeFlag, dbPath)
 		if err != nil {
 			c.Meta.Ui.Error(fmt.Sprintf("Error loading templates: %v", err))
-			return 1
+			// Try with SQLite as fallback
+			if *dbTypeFlag == "postgres" {
+				c.Meta.Ui.Output("Falling back to SQLite database...")
+				configDir := filepath.Join(os.Getenv("HOME"), ".opentofu")
+				if err := os.MkdirAll(configDir, 0755); err != nil {
+					c.Meta.Ui.Error(fmt.Sprintf("Error creating config directory: %v", err))
+					return 1
+				}
+				dbPath = filepath.Join(configDir, "templates.db")
+				err = templates.LoadTemplates("sqlite", dbPath)
+				if err != nil {
+					c.Meta.Ui.Error(fmt.Sprintf("Error loading templates with SQLite: %v", err))
+					return 1
+				}
+			} else {
+				return 1
+			}
 		}
 		
 		c.Meta.Ui.Output("Templates loaded successfully!")
@@ -80,7 +115,7 @@ func (c *TemplateCommand) Run(args []string) int {
 	}
 
 	// Connect to the template database
-	db, err := NewTemplateDB()
+	db, err := GetTemplateDB(*dbTypeFlag, c.Meta.Ui)
 	if err != nil {
 		c.Meta.Ui.Error(fmt.Sprintf("Error connecting to template database: %s", err))
 		return 1

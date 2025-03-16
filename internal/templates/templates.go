@@ -28,7 +28,7 @@ type Template struct {
 // LoadTemplates loads templates into the specified database
 func LoadTemplates(dbType, dbPath string) error {
 	// Connect to the database
-	db, err := connectToDatabase(dbType, dbPath)
+	db, err := ConnectToDatabase(dbType, dbPath)
 	if err != nil {
 		return fmt.Errorf("failed to connect to database: %v", err)
 	}
@@ -57,8 +57,8 @@ func LoadTemplates(dbType, dbPath string) error {
 	return nil
 }
 
-// connectToDatabase connects to either a SQLite or PostgreSQL database
-func connectToDatabase(dbType, dbPath string) (*sql.DB, error) {
+// ConnectToDatabase connects to either a SQLite or PostgreSQL database
+func ConnectToDatabase(dbType, dbPath string) (*sql.DB, error) {
 	var db *sql.DB
 	var err error
 
@@ -70,14 +70,15 @@ func connectToDatabase(dbType, dbPath string) (*sql.DB, error) {
 		}
 	case "postgres":
 		// Get PostgreSQL connection details from environment variables
-		host := getEnv("POSTGRES_HOST", "localhost")
-		port := getEnv("POSTGRES_PORT", "5432")
-		user := getEnv("POSTGRES_USER", "postgres")
-		password := getEnv("POSTGRES_PASSWORD", "postgres")
-		dbname := getEnv("POSTGRES_DB", "opentofu")
+		host := getEnv("TOFU_REGISTRY_DB_HOST", "localhost")
+		port := getEnv("TOFU_REGISTRY_DB_PORT", "5432")
+		user := getEnv("TOFU_REGISTRY_DB_USER", "postgres")
+		password := getEnv("TOFU_REGISTRY_DB_PASSWORD", "postgres")
+		dbname := getEnv("TOFU_REGISTRY_DB_NAME", "opentofu")
+		sslmode := getEnv("TOFU_REGISTRY_DB_SSLMODE", "disable")
 
-		connStr := fmt.Sprintf("host=%s port=%s user=%s password=%s dbname=%s sslmode=disable",
-			host, port, user, password, dbname)
+		connStr := fmt.Sprintf("host=%s port=%s user=%s password=%s dbname=%s sslmode=%s",
+			host, port, user, password, dbname, sslmode)
 		db, err = sql.Open("postgres", connStr)
 		if err != nil {
 			return nil, fmt.Errorf("failed to open PostgreSQL database: %v", err)

@@ -8,15 +8,16 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 
-	"github.com/joho/godotenv"
-	_ "github.com/lib/pq"
-	_ "github.com/mattn/go-sqlite3"
+	"github.com/mitchellh/cli"
+	"github.com/opentofu/opentofu/internal/templates"
 )
 
 // TemplateDB handles database operations for templates
 type TemplateDB struct {
-	db *sql.DB
+	DB     *sql.DB
+	DBType string
 }
 
 // Template represents a resource template
@@ -31,127 +32,60 @@ type Template struct {
 	Tags        string
 }
 
-// NewTemplateDB creates a new TemplateDB instance
-func NewTemplateDB() (*TemplateDB, error) {
-	// Try PostgreSQL first if environment variables are set
-	if os.Getenv("POSTGRES_HOST") != "" || fileExists(".env") {
-		db, err := connectToPostgres()
+// GetTemplateDB returns a TemplateDB instance for the specified database type
+func GetTemplateDB(dbType string, ui cli.Ui) (*TemplateDB, error) {
+	var dbPath string
+	
+	// Load environment variables from .env file if it exists
+	envFile := ".env"
+	if _, err := os.Stat(envFile); err == nil {
+		ui.Output("Loading environment variables from .env file...")
+		envContent, err := os.ReadFile(envFile)
 		if err == nil {
-			return &TemplateDB{db: db}, nil
+			lines := strings.Split(string(envContent), "\n")
+			for _, line := range lines {
+				line = strings.TrimSpace(line)
+				if line == "" || strings.HasPrefix(line, "#") {
+					continue
+				}
+				parts := strings.SplitN(line, "=", 2)
+				if len(parts) == 2 {
+					os.Setenv(parts[0], parts[1])
+					ui.Output(fmt.Sprintf("Set environment variable: %s", parts[0]))
+				}
+			}
 		}
-		// If PostgreSQL connection fails, fall back to SQLite
-		fmt.Println("Warning: Could not connect to PostgreSQL, falling back to SQLite")
 	}
-
-	// Use SQLite as fallback
-	return connectToSQLite()
-}
-
-// connectToPostgres connects to PostgreSQL using environment variables
-func connectToPostgres() (*sql.DB, error) {
-	// Load .env file if it exists
-	if fileExists(".env") {
-		godotenv.Load()
+	
+	if dbType == "sqlite" {
+		configDir := filepath.Join(os.Getenv("HOME"), ".opentofu")
+		if err := os.MkdirAll(configDir, 0755); err != nil {
+			return nil, fmt.Errorf("error creating config directory: %v", err)
+		}
+		dbPath = filepath.Join(configDir, "templates.db")
 	}
-
-	host := os.Getenv("POSTGRES_HOST")
-	port := os.Getenv("POSTGRES_PORT")
-	user := os.Getenv("POSTGRES_USER")
-	password := os.Getenv("POSTGRES_PASSWORD")
-	dbname := os.Getenv("POSTGRES_DB")
-
-	if host == "" {
-		host = "localhost"
-	}
-	if port == "" {
-		port = "5432"
-	}
-	if user == "" {
-		user = "postgres"
-	}
-	if dbname == "" {
-		dbname = "opentofu"
-	}
-
-	connStr := fmt.Sprintf("host=%s port=%s user=%s password=%s dbname=%s sslmode=disable",
-		host, port, user, password, dbname)
-
-	db, err := sql.Open("postgres", connStr)
+	
+	// Try to connect to the database
+	ui.Output(fmt.Sprintf("Connecting to %s database...", dbType))
+	db, err := templates.ConnectToDatabase(dbType, dbPath)
 	if err != nil {
+		ui.Error(fmt.Sprintf("Error connecting to %s database: %v", dbType, err))
+		if dbType == "postgres" {
+			ui.Output("Falling back to SQLite database...")
+			return GetTemplateDB("sqlite", ui)
+		}
 		return nil, err
 	}
-
-	if err = db.Ping(); err != nil {
-		return nil, err
-	}
-
-	// Create templates table if it doesn't exist
-	_, err = db.Exec(`
-		CREATE TABLE IF NOT EXISTS templates (
-			id SERIAL PRIMARY KEY,
-			provider VARCHAR(50) NOT NULL,
-			resource VARCHAR(100) NOT NULL,
-			display_name VARCHAR(200) NOT NULL,
-			content TEXT NOT NULL,
-			description TEXT,
-			category VARCHAR(100),
-			tags VARCHAR(200),
-			created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-			updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-			UNIQUE(provider, resource)
-		)
-	`)
-	if err != nil {
-		return nil, err
-	}
-
-	return db, nil
-}
-
-// connectToSQLite connects to a local SQLite database
-func connectToSQLite() (*TemplateDB, error) {
-	// Create the directory if it doesn't exist
-	configDir := filepath.Join(os.Getenv("HOME"), ".opentofu")
-	if err := os.MkdirAll(configDir, 0755); err != nil {
-		return nil, err
-	}
-
-	dbPath := filepath.Join(configDir, "templates.db")
-	db, err := sql.Open("sqlite3", dbPath)
-	if err != nil {
-		return nil, err
-	}
-
-	if err = db.Ping(); err != nil {
-		return nil, err
-	}
-
-	// Create templates table if it doesn't exist
-	_, err = db.Exec(`
-		CREATE TABLE IF NOT EXISTS templates (
-			id INTEGER PRIMARY KEY AUTOINCREMENT,
-			provider TEXT NOT NULL,
-			resource TEXT NOT NULL,
-			display_name TEXT NOT NULL,
-			content TEXT NOT NULL,
-			description TEXT,
-			category TEXT,
-			tags TEXT,
-			created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-			updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-			UNIQUE(provider, resource)
-		)
-	`)
-	if err != nil {
-		return nil, err
-	}
-
-	return &TemplateDB{db: db}, nil
+	
+	return &TemplateDB{
+		DB:     db,
+		DBType: dbType,
+	}, nil
 }
 
 // Close closes the database connection
 func (tdb *TemplateDB) Close() error {
-	return tdb.db.Close()
+	return tdb.DB.Close()
 }
 
 // GetTemplate retrieves a template from the database
@@ -163,7 +97,7 @@ func (tdb *TemplateDB) GetTemplate(provider, resource string) (*Template, error)
 	`
 
 	var template Template
-	err := tdb.db.QueryRow(query, provider, resource).Scan(
+	err := tdb.DB.QueryRow(query, provider, resource).Scan(
 		&template.ID,
 		&template.Provider,
 		&template.Resource,
@@ -189,7 +123,7 @@ func (tdb *TemplateDB) ListTemplates() ([]Template, error) {
 		ORDER BY provider, resource
 	`
 
-	rows, err := tdb.db.Query(query)
+	rows, err := tdb.DB.Query(query)
 	if err != nil {
 		return nil, err
 	}
@@ -225,7 +159,7 @@ func (tdb *TemplateDB) ListProviderTemplates(provider string) ([]Template, error
 		ORDER BY resource
 	`
 
-	rows, err := tdb.db.Query(query, provider)
+	rows, err := tdb.DB.Query(query, provider)
 	if err != nil {
 		return nil, err
 	}
@@ -261,7 +195,7 @@ func (tdb *TemplateDB) SaveTemplate(template *Template) error {
 		SET display_name = $3, content = $4, description = $5, category = $6, tags = $7, updated_at = CURRENT_TIMESTAMP
 	`
 
-	_, err := tdb.db.Exec(
+	_, err := tdb.DB.Exec(
 		query,
 		template.Provider,
 		template.Resource,
@@ -278,7 +212,7 @@ func (tdb *TemplateDB) SaveTemplate(template *Template) error {
 // DeleteTemplate deletes a template from the database
 func (tdb *TemplateDB) DeleteTemplate(provider, resource string) error {
 	query := `DELETE FROM templates WHERE provider = $1 AND resource = $2`
-	_, err := tdb.db.Exec(query, provider, resource)
+	_, err := tdb.DB.Exec(query, provider, resource)
 	return err
 }
 
@@ -290,7 +224,7 @@ func (tdb *TemplateDB) GetProviders() ([]string, error) {
 		ORDER BY provider
 	`
 
-	rows, err := tdb.db.Query(query)
+	rows, err := tdb.DB.Query(query)
 	if err != nil {
 		return nil, err
 	}
@@ -317,7 +251,7 @@ func (tdb *TemplateDB) GetResources(provider string) ([]string, error) {
 		ORDER BY resource
 	`
 
-	rows, err := tdb.db.Query(query, provider)
+	rows, err := tdb.DB.Query(query, provider)
 	if err != nil {
 		return nil, err
 	}
@@ -344,7 +278,7 @@ func (tdb *TemplateDB) GetTemplateContent(provider, resource string) (string, er
 	`
 
 	var content string
-	err := tdb.db.QueryRow(query, provider, resource).Scan(&content)
+	err := tdb.DB.QueryRow(query, provider, resource).Scan(&content)
 	if err != nil {
 		return "", err
 	}
