@@ -29,6 +29,7 @@ require (
 	github.com/cli/browser v1.3.0
 	github.com/davecgh/go-spew v1.1.1
 	github.com/dylanmei/winrmtest v0.0.0-20210303004826-fbc9ae56efb6
+	github.com/fatih/color v1.18.0
 	github.com/go-test/deep v1.1.0
 	github.com/go-viper/mapstructure/v2 v2.0.0-alpha.1
 	github.com/google/go-cmp v0.6.0
@@ -171,7 +172,6 @@ require (
 	github.com/creack/pty v1.1.18 // indirect
 	github.com/dimchansky/utfbom v1.1.1 // indirect
 	github.com/dylanmei/iso8601 v0.1.0 // indirect
-	github.com/fatih/color v1.18.0 // indirect
 	github.com/felixge/httpsnoop v1.0.4 // indirect
 	github.com/fsnotify/fsnotify v1.5.4 // indirect
 	github.com/go-jose/go-jose/v3 v3.0.3 // indirect

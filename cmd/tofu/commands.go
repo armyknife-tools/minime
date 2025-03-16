@@ -291,6 +291,11 @@ func initCommands(
 				Meta: meta,
 			}, nil
 		},
+		"registry search": func() (cli.Command, error) {
+			return &RegistrySearchCommand{
+				Meta: meta,
+			}, nil
+		},
 		"show": func() (cli.Command, error) {
 			return &command.ShowCommand{
 				Meta: meta,
