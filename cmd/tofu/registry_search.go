@@ -310,11 +310,35 @@ func (c *RegistrySearchCommand) outputModulesAsText(modules []*response.Module, 
 		return 0
 	}
 
+	// Define ANSI color codes
+	const (
+		colorReset   = "\033[0m"
+		colorBold    = "\033[1m"
+		colorGreen   = "\033[32m"
+		colorYellow  = "\033[33m"
+		colorBlue    = "\033[34m"
+		colorMagenta = "\033[35m"
+		colorCyan    = "\033[36m"
+		colorGray    = "\033[90m"
+		colorItalic  = "\033[3m"
+	)
+
+	// Define icons
+	const (
+		iconModule    = "📦"
+		iconVerified  = "✅"
+		iconDownloads = "⬇️ "
+		iconVersion   = "🏷️ "
+		iconSource    = "🔗"
+		iconPublished = "📅"
+		iconSeparator = "━━━"
+	)
+
 	// Create a header with count and formatting
-	c.Meta.Ui.Output(fmt.Sprintf("\n%s %d matching modules %s", 
-		strings.Repeat("=", 10),
-		len(modules),
-		strings.Repeat("=", 10)))
+	c.Meta.Ui.Output(fmt.Sprintf("\n%s%s %s%d matching modules %s%s", 
+		colorCyan, strings.Repeat("═", 10),
+		colorBold, len(modules),
+		strings.Repeat("═", 10), colorReset))
 	c.Meta.Ui.Output("")
 
 	// Sort modules by downloads (most popular first)
@@ -324,8 +348,10 @@ func (c *RegistrySearchCommand) outputModulesAsText(modules []*response.Module, 
 
 	for i, module := range modules {
 		// Create a visually distinct module entry with index
-		c.Meta.Ui.Output(fmt.Sprintf("%d. \033[1m%s/%s/%s\033[0m", 
-			i+1, module.Namespace, module.Name, module.Provider))
+		c.Meta.Ui.Output(fmt.Sprintf("%d. %s%s %s%s/%s/%s%s", 
+			i+1, 
+			colorBold, iconModule,
+			colorBlue, module.Namespace, module.Name, module.Provider, colorReset))
 		
 		// Always show a brief description if available
 		if module.Description != "" {
@@ -334,28 +360,30 @@ func (c *RegistrySearchCommand) outputModulesAsText(modules []*response.Module, 
 			if len(desc) > 80 && !detailed {
 				desc = desc[:77] + "..."
 			}
-			c.Meta.Ui.Output(fmt.Sprintf("   \033[3m%s\033[0m", desc))
+			c.Meta.Ui.Output(fmt.Sprintf("   %s%s%s", colorItalic, desc, colorReset))
 		}
 
 		// Show basic stats in a compact format
 		downloadStr := fmt.Sprintf("%d", module.Downloads)
-		if module.Downloads > 1000 {
+		if module.Downloads > 1000000 {
+			downloadStr = fmt.Sprintf("%.1fM", float64(module.Downloads)/1000000)
+		} else if module.Downloads > 1000 {
 			downloadStr = fmt.Sprintf("%.1fk", float64(module.Downloads)/1000)
 		}
 		
 		verifiedBadge := ""
 		if module.Verified {
-			verifiedBadge = "✓ Verified"
+			verifiedBadge = fmt.Sprintf("%s %sVerified%s", iconVerified, colorGreen, colorReset)
 		}
 		
 		versionInfo := ""
 		if len(module.Version) > 0 {
-			versionInfo = fmt.Sprintf("v%s", module.Version)
+			versionInfo = fmt.Sprintf("%s %sv%s%s", iconVersion, colorYellow, module.Version, colorReset)
 		}
 		
 		stats := []string{}
 		if downloadStr != "" {
-			stats = append(stats, fmt.Sprintf("Downloads: %s", downloadStr))
+			stats = append(stats, fmt.Sprintf("%s %s%s%s", iconDownloads, colorMagenta, downloadStr, colorReset))
 		}
 		if versionInfo != "" {
 			stats = append(stats, versionInfo)
@@ -364,29 +392,35 @@ func (c *RegistrySearchCommand) outputModulesAsText(modules []*response.Module, 
 			stats = append(stats, verifiedBadge)
 		}
 		
-		c.Meta.Ui.Output(fmt.Sprintf("   \033[2m%s\033[0m", strings.Join(stats, " | ")))
+		c.Meta.Ui.Output(fmt.Sprintf("   %s", strings.Join(stats, " | ")))
 
 		// Show additional details if requested
 		if detailed {
 			c.Meta.Ui.Output("")
-			c.Meta.Ui.Output(fmt.Sprintf("   Published: %s", module.PublishedAt.Format("Jan 02, 2006")))
+			c.Meta.Ui.Output(fmt.Sprintf("   %s %sPublished:%s %s", 
+				iconPublished, colorBold, colorReset, 
+				module.PublishedAt.Format("Jan 02, 2006")))
+			
 			if module.Source != "" {
-				c.Meta.Ui.Output(fmt.Sprintf("   Source: %s", module.Source))
+				c.Meta.Ui.Output(fmt.Sprintf("   %s %sSource:%s %s", 
+					iconSource, colorBold, colorReset, module.Source))
 			}
-			c.Meta.Ui.Output(fmt.Sprintf("   ID: %s", module.ID))
+			
+			c.Meta.Ui.Output(fmt.Sprintf("   %sID:%s %s", colorBold, colorReset, module.ID))
 		}
 		
 		// Add separator between modules
 		if i < len(modules)-1 {
-			c.Meta.Ui.Output(fmt.Sprintf("\n%s\n", strings.Repeat("-", 50)))
+			c.Meta.Ui.Output(fmt.Sprintf("\n%s%s%s\n", 
+				colorGray, strings.Repeat(iconSeparator, 16), colorReset))
 		}
 	}
 
 	// Add usage hint at the end
-	c.Meta.Ui.Output(fmt.Sprintf("\n%s", strings.Repeat("=", 30)))
-	c.Meta.Ui.Output("To install a module, run:")
-	c.Meta.Ui.Output("  tofu install module <namespace>/<name>/<provider>")
-	c.Meta.Ui.Output("For more details, use the -detailed flag")
+	c.Meta.Ui.Output(fmt.Sprintf("\n%s%s%s", colorCyan, strings.Repeat("═", 30), colorReset))
+	c.Meta.Ui.Output(fmt.Sprintf("%sTo install a module, run:%s", colorBold, colorReset))
+	c.Meta.Ui.Output(fmt.Sprintf("  %stofu install module <namespace>/<name>/<provider>%s", colorGreen, colorReset))
+	c.Meta.Ui.Output(fmt.Sprintf("For more details, use the %s-detailed%s flag", colorYellow, colorReset))
 
 	return 0
 }
@@ -424,11 +458,33 @@ func (c *RegistrySearchCommand) outputProvidersAsText(providers []*response.Modu
 		return 0
 	}
 
+	// Define ANSI color codes
+	const (
+		colorReset   = "\033[0m"
+		colorBold    = "\033[1m"
+		colorGreen   = "\033[32m"
+		colorYellow  = "\033[33m"
+		colorBlue    = "\033[34m"
+		colorMagenta = "\033[35m"
+		colorCyan    = "\033[36m"
+		colorGray    = "\033[90m"
+		colorItalic  = "\033[3m"
+	)
+
+	// Define icons
+	const (
+		iconProvider  = "🔌"
+		iconDownloads = "⬇️ "
+		iconModules   = "📦"
+		iconNamespace = "🏢"
+		iconSeparator = "━━━"
+	)
+
 	// Create a header with count and formatting
-	c.Meta.Ui.Output(fmt.Sprintf("\n%s %d matching providers %s", 
-		strings.Repeat("=", 10),
-		len(providers),
-		strings.Repeat("=", 10)))
+	c.Meta.Ui.Output(fmt.Sprintf("\n%s%s %s%d matching providers %s%s", 
+		colorCyan, strings.Repeat("═", 10),
+		colorBold, len(providers),
+		strings.Repeat("═", 10), colorReset))
 	c.Meta.Ui.Output("")
 
 	// Sort providers by downloads (most popular first)
@@ -442,22 +498,28 @@ func (c *RegistrySearchCommand) outputProvidersAsText(providers []*response.Modu
 		displayName := provider.Name
 		
 		// Create a visually distinct provider entry with index
-		c.Meta.Ui.Output(fmt.Sprintf("%d. \033[1m%s\033[0m", i+1, displayName))
+		c.Meta.Ui.Output(fmt.Sprintf("%d. %s%s %s%s%s", 
+			i+1, colorBold, iconProvider, colorBlue, displayName, colorReset))
 		
 		// Show basic stats in a compact format
 		downloadStr := fmt.Sprintf("%d", provider.Downloads)
-		if provider.Downloads > 1000 {
+		if provider.Downloads > 1000000 {
+			downloadStr = fmt.Sprintf("%.1fM", float64(provider.Downloads)/1000000)
+		} else if provider.Downloads > 1000 {
 			downloadStr = fmt.Sprintf("%.1fk", float64(provider.Downloads)/1000)
 		}
 		
-		moduleCountStr := fmt.Sprintf("%d modules", provider.ModuleCount)
+		moduleCountStr := fmt.Sprintf("%s %s%d modules%s", 
+			iconModules, colorYellow, provider.ModuleCount, colorReset)
 		if provider.ModuleCount == 1 {
-			moduleCountStr = "1 module"
+			moduleCountStr = fmt.Sprintf("%s %s1 module%s", 
+				iconModules, colorYellow, colorReset)
 		}
 		
 		stats := []string{}
 		if downloadStr != "" {
-			stats = append(stats, fmt.Sprintf("Downloads: %s", downloadStr))
+			stats = append(stats, fmt.Sprintf("%s %s%s%s", 
+				iconDownloads, colorMagenta, downloadStr, colorReset))
 		}
 		if moduleCountStr != "" {
 			stats = append(stats, moduleCountStr)
@@ -465,35 +527,36 @@ func (c *RegistrySearchCommand) outputProvidersAsText(providers []*response.Modu
 		
 		// If we have namespace information, display it
 		if len(parts) > 1 {
-			stats = append(stats, fmt.Sprintf("Namespace: %s", parts[0]))
+			stats = append(stats, fmt.Sprintf("%s %s%s%s", 
+				iconNamespace, colorGreen, parts[0], colorReset))
 		}
 		
-		c.Meta.Ui.Output(fmt.Sprintf("   \033[2m%s\033[0m", strings.Join(stats, " | ")))
+		c.Meta.Ui.Output(fmt.Sprintf("   %s", strings.Join(stats, " | ")))
 		
 		// Show additional details if requested
 		if detailed {
 			c.Meta.Ui.Output("")
-			// If we have more detailed provider information, display it here
-			// This could be expanded in the future as more provider data becomes available
+			// Add any additional provider details here if they become available in the API
 		}
 		
 		// Add separator between providers
 		if i < len(providers)-1 {
-			c.Meta.Ui.Output(fmt.Sprintf("\n%s\n", strings.Repeat("-", 50)))
+			c.Meta.Ui.Output(fmt.Sprintf("\n%s%s%s\n", 
+				colorGray, strings.Repeat(iconSeparator, 16), colorReset))
 		}
 	}
 
 	// Add usage hint at the end
-	c.Meta.Ui.Output(fmt.Sprintf("\n%s", strings.Repeat("=", 30)))
-	c.Meta.Ui.Output("To use a provider, include it in your configuration:")
-	c.Meta.Ui.Output("  terraform {")
-	c.Meta.Ui.Output("    required_providers {")
-	c.Meta.Ui.Output("      <name> = {")
-	c.Meta.Ui.Output("        source = \"<provider-address>\"")
-	c.Meta.Ui.Output("      }")
-	c.Meta.Ui.Output("    }")
-	c.Meta.Ui.Output("  }")
-	c.Meta.Ui.Output("For more details, use the -detailed flag")
+	c.Meta.Ui.Output(fmt.Sprintf("\n%s%s%s", colorCyan, strings.Repeat("═", 30), colorReset))
+	c.Meta.Ui.Output(fmt.Sprintf("%sTo use a provider, include it in your configuration:%s", colorBold, colorReset))
+	c.Meta.Ui.Output(fmt.Sprintf("  %sterraform {%s", colorGreen, colorReset))
+	c.Meta.Ui.Output(fmt.Sprintf("  %s  required_providers {%s", colorGreen, colorReset))
+	c.Meta.Ui.Output(fmt.Sprintf("  %s    <name> = {%s", colorGreen, colorReset))
+	c.Meta.Ui.Output(fmt.Sprintf("  %s      source = \"<provider-address>\"%s", colorGreen, colorReset))
+	c.Meta.Ui.Output(fmt.Sprintf("  %s    }%s", colorGreen, colorReset))
+	c.Meta.Ui.Output(fmt.Sprintf("  %s  }%s", colorGreen, colorReset))
+	c.Meta.Ui.Output(fmt.Sprintf("  %s}%s", colorGreen, colorReset))
+	c.Meta.Ui.Output(fmt.Sprintf("For more details, use the %s-detailed%s flag", colorYellow, colorReset))
 
 	return 0
 }
