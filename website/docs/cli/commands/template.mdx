@@ -1,0 +1,94 @@
+---
+sidebar_label: template
+---
+
+# Command: template
+
+The `template` command provides a way to generate and manage infrastructure templates for various cloud providers and resources. It helps users quickly create standardized configuration files for common infrastructure components.
+
+## Usage
+
+```shell
+tofu template [options] [provider[/resource]]
+```
+
+This command has multiple modes of operation:
+
+- With no arguments, it lists all available providers.
+- With a provider argument (e.g., `aws`), it lists all available resources for that provider.
+- With a provider and resource argument (e.g., `aws/s3`), it generates a template for that resource.
+
+## Options
+
+- `-db=<type>` - Database type to use for template storage. Valid values are `postgres` (default) and `sqlite`.
+- `-load` - Load built-in templates into the database.
+- `-output=<path>` - Output path for the generated template file. Default is the resource name with a `.tf` extension.
+
+## Environment Variables
+
+The template command uses the following environment variables for PostgreSQL connection:
+
+- `TOFU_REGISTRY_DB_TYPE` - Database type (postgres)
+- `TOFU_REGISTRY_DB_HOST` - PostgreSQL host
+- `TOFU_REGISTRY_DB_PORT` - PostgreSQL port
+- `TOFU_REGISTRY_DB_NAME` - Database name
+- `TOFU_REGISTRY_DB_USER` - Database user
+- `TOFU_REGISTRY_DB_PASSWORD` - Database password
+- `TOFU_REGISTRY_DB_SSLMODE` - SSL mode for PostgreSQL (require, disable, etc.)
+
+These variables can be set in a `.env` file in the current directory.
+
+## Examples
+
+### List Available Providers
+
+```shell
+$ tofu template
+Available providers:
+  aws
+  azure
+  gcp
+```
+
+### List Available Resources for a Provider
+
+```shell
+$ tofu template aws
+Available resources for aws:
+  ec2
+  rds
+  s3
+```
+
+### Generate a Template for a Resource
+
+```shell
+$ tofu template aws/s3
+Template for aws/s3 written to s3.tf
+```
+
+The generated template will include common configuration options for the specified resource, which you can then customize for your specific needs.
+
+### Load Templates into the Database
+
+```shell
+$ tofu template -load
+Loading templates into the database...
+Templates loaded successfully!
+```
+
+## Database Storage
+
+The template command supports two database backends:
+
+1. **PostgreSQL** (default): For production environments or shared template repositories. Requires setting the PostgreSQL connection variables in a `.env` file.
+
+2. **SQLite**: Used as a fallback when PostgreSQL is not available or for local development. The SQLite database is stored in `~/.opentofu/templates.db`.
+
+If PostgreSQL connection fails, the command will automatically fall back to SQLite.
+
+## Notes
+
+- Templates are designed to be starting points and may need customization for your specific use case.
+- The template system can be extended with custom templates by adding them to the database.
+- All generated templates include best practices and common configuration options for the specified resource.

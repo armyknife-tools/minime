@@ -1,0 +1,208 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<mxfile host="app.diagrams.net" modified="2025-03-16T22:08:40.000Z" agent="OpenTofu Template System" etag="template-system-diagram" version="15.8.6" type="device">
+  <diagram id="C5RBs43oDa-KdzZeNtuy" name="Template Generation System">
+    <mxGraphModel dx="1422" dy="762" grid="1" gridSize="10" guides="1" tooltips="1" connect="1" arrows="1" fold="1" page="1" pageScale="1" pageWidth="827" pageHeight="1169" math="0" shadow="0">
+      <root>
+        <mxCell id="WIyWlLk6GJQsqaUBKTNV-0" />
+        <mxCell id="WIyWlLk6GJQsqaUBKTNV-1" parent="WIyWlLk6GJQsqaUBKTNV-0" />
+        
+        <!-- CLI Interface -->
+        <mxCell id="cli-interface" value="OpenTofu CLI Interface" style="rounded=1;whiteSpace=wrap;html=1;fontSize=14;glass=0;strokeWidth=2;shadow=0;fillColor=#dae8fc;strokeColor=#6c8ebf;" parent="WIyWlLk6GJQsqaUBKTNV-1" vertex="1">
+          <mxGeometry x="160" y="40" width="440" height="60" as="geometry" />
+        </mxCell>
+        
+        <!-- Template Command -->
+        <mxCell id="template-command" value="Template Command&#xa;(cmd/tofu/template.go)" style="swimlane;fontStyle=0;childLayout=stackLayout;horizontal=1;startSize=40;horizontalStack=0;resizeParent=1;resizeParentMax=0;resizeLast=0;collapsible=1;marginBottom=0;whiteSpace=wrap;html=1;fillColor=#d5e8d4;strokeColor=#82b366;" parent="WIyWlLk6GJQsqaUBKTNV-1" vertex="1">
+          <mxGeometry x="160" y="140" width="440" height="130" as="geometry" />
+        </mxCell>
+        <mxCell id="parse-args" value="Parse Command Arguments" style="text;strokeColor=none;fillColor=none;align=left;verticalAlign=middle;spacingLeft=4;spacingRight=4;overflow=hidden;points=[[0,0.5],[1,0.5]];portConstraint=eastwest;rotatable=0;whiteSpace=wrap;html=1;" parent="template-command" vertex="1">
+          <mxGeometry y="40" width="440" height="30" as="geometry" />
+        </mxCell>
+        <mxCell id="load-env" value="Load Environment Variables from .env File" style="text;strokeColor=none;fillColor=none;align=left;verticalAlign=middle;spacingLeft=4;spacingRight=4;overflow=hidden;points=[[0,0.5],[1,0.5]];portConstraint=eastwest;rotatable=0;whiteSpace=wrap;html=1;" parent="template-command" vertex="1">
+          <mxGeometry y="70" width="440" height="30" as="geometry" />
+        </mxCell>
+        <mxCell id="process-flags" value="Process Command Flags (-db, -load, -output)" style="text;strokeColor=none;fillColor=none;align=left;verticalAlign=middle;spacingLeft=4;spacingRight=4;overflow=hidden;points=[[0,0.5],[1,0.5]];portConstraint=eastwest;rotatable=0;whiteSpace=wrap;html=1;" parent="template-command" vertex="1">
+          <mxGeometry y="100" width="440" height="30" as="geometry" />
+        </mxCell>
+        
+        <!-- Template DB Layer -->
+        <mxCell id="template-db" value="Template Database Layer&#xa;(cmd/tofu/template_db.go)" style="swimlane;fontStyle=0;childLayout=stackLayout;horizontal=1;startSize=40;horizontalStack=0;resizeParent=1;resizeParentMax=0;resizeLast=0;collapsible=1;marginBottom=0;whiteSpace=wrap;html=1;fillColor=#ffe6cc;strokeColor=#d79b00;" parent="WIyWlLk6GJQsqaUBKTNV-1" vertex="1">
+          <mxGeometry x="160" y="310" width="440" height="130" as="geometry" />
+        </mxCell>
+        <mxCell id="get-template-db" value="GetTemplateDB(dbType, ui)" style="text;strokeColor=none;fillColor=none;align=left;verticalAlign=middle;spacingLeft=4;spacingRight=4;overflow=hidden;points=[[0,0.5],[1,0.5]];portConstraint=eastwest;rotatable=0;whiteSpace=wrap;html=1;" parent="template-db" vertex="1">
+          <mxGeometry y="40" width="440" height="30" as="geometry" />
+        </mxCell>
+        <mxCell id="db-operations" value="Database Operations (GetProviders, GetResources, GetTemplate)" style="text;strokeColor=none;fillColor=none;align=left;verticalAlign=middle;spacingLeft=4;spacingRight=4;overflow=hidden;points=[[0,0.5],[1,0.5]];portConstraint=eastwest;rotatable=0;whiteSpace=wrap;html=1;" parent="template-db" vertex="1">
+          <mxGeometry y="70" width="440" height="30" as="geometry" />
+        </mxCell>
+        <mxCell id="template-retrieval" value="Template Content Retrieval" style="text;strokeColor=none;fillColor=none;align=left;verticalAlign=middle;spacingLeft=4;spacingRight=4;overflow=hidden;points=[[0,0.5],[1,0.5]];portConstraint=eastwest;rotatable=0;whiteSpace=wrap;html=1;" parent="template-db" vertex="1">
+          <mxGeometry y="100" width="440" height="30" as="geometry" />
+        </mxCell>
+        
+        <!-- Database Connection Layer -->
+        <mxCell id="db-connection" value="Database Connection Layer&#xa;(internal/templates/templates.go)" style="swimlane;fontStyle=0;childLayout=stackLayout;horizontal=1;startSize=40;horizontalStack=0;resizeParent=1;resizeParentMax=0;resizeLast=0;collapsible=1;marginBottom=0;whiteSpace=wrap;html=1;fillColor=#fff2cc;strokeColor=#d6b656;" parent="WIyWlLk6GJQsqaUBKTNV-1" vertex="1">
+          <mxGeometry x="160" y="480" width="440" height="100" as="geometry" />
+        </mxCell>
+        <mxCell id="connect-to-db" value="ConnectToDatabase(dbType, dbPath)" style="text;strokeColor=none;fillColor=none;align=left;verticalAlign=middle;spacingLeft=4;spacingRight=4;overflow=hidden;points=[[0,0.5],[1,0.5]];portConstraint=eastwest;rotatable=0;whiteSpace=wrap;html=1;" parent="db-connection" vertex="1">
+          <mxGeometry y="40" width="440" height="30" as="geometry" />
+        </mxCell>
+        <mxCell id="load-templates" value="LoadTemplates(dbType, dbPath)" style="text;strokeColor=none;fillColor=none;align=left;verticalAlign=middle;spacingLeft=4;spacingRight=4;overflow=hidden;points=[[0,0.5],[1,0.5]];portConstraint=eastwest;rotatable=0;whiteSpace=wrap;html=1;" parent="db-connection" vertex="1">
+          <mxGeometry y="70" width="440" height="30" as="geometry" />
+        </mxCell>
+        
+        <!-- Database Storage -->
+        <mxCell id="db-storage" value="Template Storage" style="swimlane;whiteSpace=wrap;html=1;fillColor=#f8cecc;strokeColor=#b85450;" parent="WIyWlLk6GJQsqaUBKTNV-1" vertex="1">
+          <mxGeometry x="160" y="620" width="440" height="140" as="geometry" />
+        </mxCell>
+        
+        <!-- PostgreSQL -->
+        <mxCell id="postgres-db" value="PostgreSQL Database&#xa;(Primary)" style="rounded=1;whiteSpace=wrap;html=1;fontSize=12;glass=0;strokeWidth=1;shadow=0;fillColor=#e1d5e7;strokeColor=#9673a6;" parent="db-storage" vertex="1">
+          <mxGeometry x="30" y="50" width="160" height="60" as="geometry" />
+        </mxCell>
+        
+        <!-- SQLite -->
+        <mxCell id="sqlite-db" value="SQLite Database&#xa;(Fallback)" style="rounded=1;whiteSpace=wrap;html=1;fontSize=12;glass=0;strokeWidth=1;shadow=0;fillColor=#e1d5e7;strokeColor=#9673a6;" parent="db-storage" vertex="1">
+          <mxGeometry x="250" y="50" width="160" height="60" as="geometry" />
+        </mxCell>
+        
+        <!-- Template Generation -->
+        <mxCell id="template-gen" value="Template Generation" style="swimlane;fontStyle=0;childLayout=stackLayout;horizontal=1;startSize=40;horizontalStack=0;resizeParent=1;resizeParentMax=0;resizeLast=0;collapsible=1;marginBottom=0;whiteSpace=wrap;html=1;fillColor=#f5f5f5;strokeColor=#666666;fontColor=#333333;" parent="WIyWlLk6GJQsqaUBKTNV-1" vertex="1">
+          <mxGeometry x="160" y="800" width="440" height="130" as="geometry" />
+        </mxCell>
+        <mxCell id="retrieve-template" value="Retrieve Template from Database" style="text;strokeColor=none;fillColor=none;align=left;verticalAlign=middle;spacingLeft=4;spacingRight=4;overflow=hidden;points=[[0,0.5],[1,0.5]];portConstraint=eastwest;rotatable=0;whiteSpace=wrap;html=1;" parent="template-gen" vertex="1">
+          <mxGeometry y="40" width="440" height="30" as="geometry" />
+        </mxCell>
+        <mxCell id="process-template" value="Process Template (Apply Variables)" style="text;strokeColor=none;fillColor=none;align=left;verticalAlign=middle;spacingLeft=4;spacingRight=4;overflow=hidden;points=[[0,0.5],[1,0.5]];portConstraint=eastwest;rotatable=0;whiteSpace=wrap;html=1;" parent="template-gen" vertex="1">
+          <mxGeometry y="70" width="440" height="30" as="geometry" />
+        </mxCell>
+        <mxCell id="write-template" value="Write Template to File (.tf)" style="text;strokeColor=none;fillColor=none;align=left;verticalAlign=middle;spacingLeft=4;spacingRight=4;overflow=hidden;points=[[0,0.5],[1,0.5]];portConstraint=eastwest;rotatable=0;whiteSpace=wrap;html=1;" parent="template-gen" vertex="1">
+          <mxGeometry y="100" width="440" height="30" as="geometry" />
+        </mxCell>
+        
+        <!-- Connections -->
+        <mxCell id="cli-to-template" value="" style="endArrow=classic;html=1;rounded=0;exitX=0.5;exitY=1;exitDx=0;exitDy=0;entryX=0.5;entryY=0;entryDx=0;entryDy=0;" edge="1" parent="WIyWlLk6GJQsqaUBKTNV-1" source="cli-interface" target="template-command">
+          <mxGeometry width="50" height="50" relative="1" as="geometry">
+            <mxPoint x="390" y="410" as="sourcePoint" />
+            <mxPoint x="440" y="360" as="targetPoint" />
+          </mxGeometry>
+        </mxCell>
+        
+        <mxCell id="template-to-db" value="" style="endArrow=classic;html=1;rounded=0;exitX=0.5;exitY=1;exitDx=0;exitDy=0;entryX=0.5;entryY=0;entryDx=0;entryDy=0;" edge="1" parent="WIyWlLk6GJQsqaUBKTNV-1" source="template-command" target="template-db">
+          <mxGeometry width="50" height="50" relative="1" as="geometry">
+            <mxPoint x="390" y="410" as="sourcePoint" />
+            <mxPoint x="440" y="360" as="targetPoint" />
+          </mxGeometry>
+        </mxCell>
+        
+        <mxCell id="db-to-connection" value="" style="endArrow=classic;html=1;rounded=0;exitX=0.5;exitY=1;exitDx=0;exitDy=0;entryX=0.5;entryY=0;entryDx=0;entryDy=0;" edge="1" parent="WIyWlLk6GJQsqaUBKTNV-1" source="template-db" target="db-connection">
+          <mxGeometry width="50" height="50" relative="1" as="geometry">
+            <mxPoint x="390" y="410" as="sourcePoint" />
+            <mxPoint x="440" y="360" as="targetPoint" />
+          </mxGeometry>
+        </mxCell>
+        
+        <mxCell id="connection-to-storage" value="" style="endArrow=classic;html=1;rounded=0;exitX=0.5;exitY=1;exitDx=0;exitDy=0;entryX=0.5;entryY=0;entryDx=0;entryDy=0;" edge="1" parent="WIyWlLk6GJQsqaUBKTNV-1" source="db-connection" target="db-storage">
+          <mxGeometry width="50" height="50" relative="1" as="geometry">
+            <mxPoint x="390" y="410" as="sourcePoint" />
+            <mxPoint x="440" y="360" as="targetPoint" />
+          </mxGeometry>
+        </mxCell>
+        
+        <mxCell id="storage-to-gen" value="" style="endArrow=classic;html=1;rounded=0;exitX=0.5;exitY=1;exitDx=0;exitDy=0;entryX=0.5;entryY=0;entryDx=0;entryDy=0;" edge="1" parent="WIyWlLk6GJQsqaUBKTNV-1" source="db-storage" target="template-gen">
+          <mxGeometry width="50" height="50" relative="1" as="geometry">
+            <mxPoint x="390" y="410" as="sourcePoint" />
+            <mxPoint x="440" y="360" as="targetPoint" />
+          </mxGeometry>
+        </mxCell>
+        
+        <!-- Postgres to SQLite Fallback -->
+        <mxCell id="postgres-to-sqlite" value="Fallback if&#xa;PostgreSQL fails" style="endArrow=classic;html=1;rounded=0;exitX=1;exitY=0.5;exitDx=0;exitDy=0;entryX=0;entryY=0.5;entryDx=0;entryDy=0;" edge="1" parent="WIyWlLk6GJQsqaUBKTNV-1" source="postgres-db" target="sqlite-db">
+          <mxGeometry width="50" height="50" relative="1" as="geometry">
+            <mxPoint x="390" y="410" as="sourcePoint" />
+            <mxPoint x="440" y="360" as="targetPoint" />
+          </mxGeometry>
+        </mxCell>
+        
+        <!-- Environment Variables -->
+        <mxCell id="env-vars" value="Environment Variables&#xa;(.env file)" style="shape=note;whiteSpace=wrap;html=1;backgroundOutline=1;darkOpacity=0.05;fillColor=#f5f5f5;strokeColor=#666666;fontColor=#333333;" vertex="1" parent="WIyWlLk6GJQsqaUBKTNV-1">
+          <mxGeometry x="40" y="500" width="80" height="100" as="geometry" />
+        </mxCell>
+        
+        <mxCell id="env-to-connection" value="" style="endArrow=classic;html=1;rounded=0;exitX=1;exitY=0.5;exitDx=0;exitDy=0;entryX=0;entryY=0.5;entryDx=0;entryDy=0;exitPerimeter=0;" edge="1" parent="WIyWlLk6GJQsqaUBKTNV-1" source="env-vars" target="connect-to-db">
+          <mxGeometry width="50" height="50" relative="1" as="geometry">
+            <mxPoint x="390" y="410" as="sourcePoint" />
+            <mxPoint x="440" y="360" as="targetPoint" />
+          </mxGeometry>
+        </mxCell>
+        
+        <!-- Database Fallback Mechanism -->
+        <mxCell id="fallback-mechanism" value="Database Fallback Mechanism" style="swimlane;whiteSpace=wrap;html=1;fillColor=#f5f5f5;strokeColor=#666666;fontColor=#333333;" vertex="1" parent="WIyWlLk6GJQsqaUBKTNV-1">
+          <mxGeometry x="640" y="480" width="360" height="280" as="geometry" />
+        </mxCell>
+        
+        <mxCell id="start-db" value="Start DB Connection" style="rounded=1;whiteSpace=wrap;html=1;fontSize=12;glass=0;strokeWidth=1;shadow=0;fillColor=#dae8fc;strokeColor=#6c8ebf;" vertex="1" parent="fallback-mechanism">
+          <mxGeometry x="120" y="40" width="120" height="40" as="geometry" />
+        </mxCell>
+        
+        <mxCell id="try-postgres" value="Try PostgreSQL Connection" style="rhombus;whiteSpace=wrap;html=1;fillColor=#ffe6cc;strokeColor=#d79b00;" vertex="1" parent="fallback-mechanism">
+          <mxGeometry x="95" y="110" width="170" height="60" as="geometry" />
+        </mxCell>
+        
+        <mxCell id="postgres-success" value="Connected Successfully" style="rounded=1;whiteSpace=wrap;html=1;fontSize=12;glass=0;strokeWidth=1;shadow=0;fillColor=#d5e8d4;strokeColor=#82b366;" vertex="1" parent="fallback-mechanism">
+          <mxGeometry x="240" y="170" width="100" height="40" as="geometry" />
+        </mxCell>
+        
+        <mxCell id="try-sqlite" value="Fall back to SQLite" style="rhombus;whiteSpace=wrap;html=1;fillColor=#ffe6cc;strokeColor=#d79b00;" vertex="1" parent="fallback-mechanism">
+          <mxGeometry x="95" y="180" width="170" height="60" as="geometry" />
+        </mxCell>
+        
+        <mxCell id="sqlite-success" value="Connected Successfully" style="rounded=1;whiteSpace=wrap;html=1;fontSize=12;glass=0;strokeWidth=1;shadow=0;fillColor=#d5e8d4;strokeColor=#82b366;" vertex="1" parent="fallback-mechanism">
+          <mxGeometry x="240" y="230" width="100" height="40" as="geometry" />
+        </mxCell>
+        
+        <mxCell id="connection-error" value="Return Error" style="rounded=1;whiteSpace=wrap;html=1;fontSize=12;glass=0;strokeWidth=1;shadow=0;fillColor=#f8cecc;strokeColor=#b85450;" vertex="1" parent="fallback-mechanism">
+          <mxGeometry x="20" y="230" width="100" height="40" as="geometry" />
+        </mxCell>
+        
+        <mxCell id="start-to-try" value="" style="endArrow=classic;html=1;rounded=0;exitX=0.5;exitY=1;exitDx=0;exitDy=0;entryX=0.5;entryY=0;entryDx=0;entryDy=0;" edge="1" parent="fallback-mechanism" source="start-db" target="try-postgres">
+          <mxGeometry width="50" height="50" relative="1" as="geometry">
+            <mxPoint x="230" y="-70" as="sourcePoint" />
+            <mxPoint x="280" y="-120" as="targetPoint" />
+          </mxGeometry>
+        </mxCell>
+        
+        <mxCell id="postgres-to-success" value="✓" style="endArrow=classic;html=1;rounded=0;exitX=1;exitY=0.5;exitDx=0;exitDy=0;entryX=0.5;entryY=0;entryDx=0;entryDy=0;" edge="1" parent="fallback-mechanism" source="try-postgres" target="postgres-success">
+          <mxGeometry width="50" height="50" relative="1" as="geometry">
+            <mxPoint x="230" y="-70" as="sourcePoint" />
+            <mxPoint x="280" y="-120" as="targetPoint" />
+            <Array as="points">
+              <mxPoint x="290" y="140" />
+            </Array>
+          </mxGeometry>
+        </mxCell>
+        
+        <mxCell id="postgres-to-sqlite" value="✗" style="endArrow=classic;html=1;rounded=0;exitX=0.5;exitY=1;exitDx=0;exitDy=0;entryX=0.5;entryY=0;entryDx=0;entryDy=0;" edge="1" parent="fallback-mechanism" source="try-postgres" target="try-sqlite">
+          <mxGeometry width="50" height="50" relative="1" as="geometry">
+            <mxPoint x="230" y="-70" as="sourcePoint" />
+            <mxPoint x="280" y="-120" as="targetPoint" />
+          </mxGeometry>
+        </mxCell>
+        
+        <mxCell id="sqlite-to-success" value="✓" style="endArrow=classic;html=1;rounded=0;exitX=1;exitY=0.5;exitDx=0;exitDy=0;entryX=0;entryY=0.5;entryDx=0;entryDy=0;" edge="1" parent="fallback-mechanism" source="try-sqlite" target="sqlite-success">
+          <mxGeometry width="50" height="50" relative="1" as="geometry">
+            <mxPoint x="230" y="-70" as="sourcePoint" />
+            <mxPoint x="280" y="-120" as="targetPoint" />
+          </mxGeometry>
+        </mxCell>
+        
+        <mxCell id="sqlite-to-error" value="✗" style="endArrow=classic;html=1;rounded=0;exitX=0;exitY=0.5;exitDx=0;exitDy=0;entryX=1;entryY=0.5;entryDx=0;entryDy=0;" edge="1" parent="fallback-mechanism" source="try-sqlite" target="connection-error">
+          <mxGeometry width="50" height="50" relative="1" as="geometry">
+            <mxPoint x="230" y="-70" as="sourcePoint" />
+            <mxPoint x="280" y="-120" as="targetPoint" />
+          </mxGeometry>
+        </mxCell>
+        
+      </root>
+    </mxGraphModel>
+  </diagram>
+</mxfile>
