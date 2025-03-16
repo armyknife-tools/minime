@@ -30,6 +30,19 @@ The key features of OpenTofu are:
 > [!TIP]
 > For more OpenTofu events, subscribe to the [OpenTofu Events Calendar](https://calendar.google.com/calendar/embed?src=c_3f2dd3c1fe0ef4e93ef3fc456ca2dd219a2e8fd85f6b40750af16c3df370bf93%40group.calendar.google.com)!
 
+## Recent Improvements
+
+### Registry API Enhancements
+
+The OpenTofu Registry API has been significantly improved to enhance reliability and performance:
+
+- **Robust Provider Fetching**: Implemented a multi-stage approach to fetching providers from the Terraform Registry
+- **Enhanced Module Search**: Improved the search functionality for modules with better caching and error handling
+- **Performance Optimizations**: Pre-allocated data structures based on known registry sizes (4,000 providers, 18,000 modules)
+- **Better Error Handling**: Added comprehensive error handling and logging for registry operations
+
+For more details, see the [Registry API Improvements documentation](docs/registry_api_improvements.md).
+
 ## Reporting security vulnerabilities
 If you've found a vulnerability or a potential vulnerability in OpenTofu please follow [Security Policy](https://github.com/opentofu/opentofu/security/policy). We'll send a confirmation email to acknowledge your report, and we'll send an additional email when we've identified the issue positively or negatively.
 
@@ -44,4 +57,3 @@ In an effort to comply with applicable sanctions, we block access from specific 
 ## License
 
 [Mozilla Public License v2.0](https://github.com/opentofu/opentofu/blob/main/LICENSE)
-
