@@ -276,7 +276,16 @@ func initCommands(
 				Meta: meta,
 			}, nil
 		},
-
+		"registry": func() (cli.Command, error) {
+			return &RegistryCommand{
+				Meta: meta,
+			}, nil
+		},
+		"registry refresh": func() (cli.Command, error) {
+			return &RegistryRefreshCommand{
+				Meta: meta,
+			}, nil
+		},
 		"show": func() (cli.Command, error) {
 			return &command.ShowCommand{
 				Meta: meta,
