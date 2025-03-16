@@ -1,0 +1,114 @@
+name: Security Checks
+
+on:
+  push:
+    branches:
+      - main
+      - master
+  pull_request:
+    branches:
+      - main
+      - master
+  schedule:
+    - cron: '0 0 * * *'  # Run daily at midnight UTC
+  workflow_dispatch:
+
+jobs:
+  security-scan:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v3
+        with:
+          fetch-depth: 0
+
+      - name: Set up Go
+        uses: actions/setup-go@v4
+        with:
+          go-version: '1.21'
+
+      - name: Run gosec
+        uses: securego/gosec@master
+        with:
+          args: ./...
+
+      - name: Run dependency vulnerability scan
+        uses: golang/govulncheck-action@v1
+
+      - name: Check for hardcoded secrets
+        uses: gitleaks/gitleaks-action@v2
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+  branch-protection:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v3
+
+      - name: Configure branch protection
+        uses: actions/github-script@v6
+        with:
+          github-token: ${{ secrets.ADMIN_TOKEN }}
+          script: |
+            const owner = context.repo.owner;
+            const repo = context.repo.repo;
+            
+            // Configure branch protection for main branch
+            await github.rest.repos.updateBranchProtection({
+              owner,
+              repo,
+              branch: 'main',
+              required_status_checks: {
+                strict: true,
+                contexts: ['security-scan', 'build-and-test']
+              },
+              enforce_admins: true,
+              required_pull_request_reviews: {
+                dismissal_restrictions: {},
+                dismiss_stale_reviews: true,
+                require_code_owner_reviews: true,
+                required_approving_review_count: 1
+              },
+              restrictions: null
+            });
+            
+            // Configure branch protection for master branch if it exists
+            try {
+              await github.rest.repos.getBranch({
+                owner,
+                repo,
+                branch: 'master'
+              });
+              
+              await github.rest.repos.updateBranchProtection({
+                owner,
+                repo,
+                branch: 'master',
+                required_status_checks: {
+                  strict: true,
+                  contexts: ['security-scan', 'build-and-test']
+                },
+                enforce_admins: true,
+                required_pull_request_reviews: {
+                  dismissal_restrictions: {},
+                  dismiss_stale_reviews: true,
+                  require_code_owner_reviews: true,
+                  required_approving_review_count: 1
+                },
+                restrictions: null
+              });
+            } catch (error) {
+              console.log('Master branch not found, skipping protection');
+            }
+            
+            // Enable vulnerability alerts and automated security fixes
+            await github.rest.repos.enableVulnerabilityAlerts({
+              owner,
+              repo
+            });
+            
+            await github.rest.repos.enableAutomatedSecurityFixes({
+              owner,
+              repo
+            });

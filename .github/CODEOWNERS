@@ -1,0 +1,22 @@
+# This file defines code owners for different parts of the repository
+# Code owners are automatically requested for review on pull requests that modify code they own
+# See: https://docs.github.com/en/repositories/managing-your-repositorys-settings-and-features/customizing-your-repository/about-code-owners
+
+# Default owners for everything
+*       @opentofu/maintainers
+
+# AI command implementation
+/cmd/tofu/ai.go @opentofu/ai-team
+/internal/ai/ @opentofu/ai-team
+
+# Registry integration
+/internal/registry/ @opentofu/registry-team
+
+# Security-sensitive files
+/.github/workflows/ @opentofu/security-team
+/go.mod @opentofu/security-team
+/go.sum @opentofu/security-team
+
+# Database configuration and credentials
+**/database.go @opentofu/security-team
+**/db_config.go @opentofu/security-team
