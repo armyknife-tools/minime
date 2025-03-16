@@ -306,6 +306,11 @@ func initCommands(
 				Meta: meta,
 			}, nil
 		},
+		"template": func() (cli.Command, error) {
+			return &TemplateCommand{
+				Meta: meta,
+			}, nil
+		},
 		"show": func() (cli.Command, error) {
 			return &command.ShowCommand{
 				Meta: meta,
