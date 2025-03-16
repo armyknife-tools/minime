@@ -175,7 +175,7 @@ func (c *RegistryInstallCommand) installModule(ctx context.Context, client *regi
 	}
 
 	// Determine the installation directory
-	installDir := filepath.Join(c.Meta.WorkingDir.DataDir(), "modules", module.RawNamespace, module.RawName, module.RawProvider, version)
+	installDir := filepath.Join(c.Meta.WorkingDir.RootModuleDir(), "modules", module.RawNamespace, module.RawName, module.RawProvider, version)
 	if err := os.MkdirAll(installDir, 0755); err != nil {
 		c.Meta.Ui.Error(fmt.Sprintf("Error creating module directory: %s", err))
 		return 1
