@@ -2,21 +2,21 @@
 # Code owners are automatically requested for review on pull requests that modify code they own
 # See: https://docs.github.com/en/repositories/managing-your-repositorys-settings-and-features/customizing-your-repository/about-code-owners
 
-# Default owners for everything
-*       @opentofu/maintainers
+# Default owner for everything
+*       @armyknife-tools
 
 # AI command implementation
-/cmd/tofu/ai.go @opentofu/ai-team
-/internal/ai/ @opentofu/ai-team
+/cmd/tofu/ai.go @armyknife-tools
+/internal/ai/ @armyknife-tools
 
 # Registry integration
-/internal/registry/ @opentofu/registry-team
+/internal/registry/ @armyknife-tools
 
 # Security-sensitive files
-/.github/workflows/ @opentofu/security-team
-/go.mod @opentofu/security-team
-/go.sum @opentofu/security-team
+/.github/workflows/ @armyknife-tools
+/go.mod @armyknife-tools
+/go.sum @armyknife-tools
 
 # Database configuration and credentials
-**/database.go @opentofu/security-team
-**/db_config.go @opentofu/security-team
+**/database.go @armyknife-tools
+**/db_config.go @armyknife-tools

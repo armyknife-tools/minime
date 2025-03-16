@@ -49,7 +49,7 @@ jobs:
       - name: Configure branch protection
         uses: actions/github-script@v6
         with:
-          github-token: ${{ secrets.ADMIN_TOKEN }}
+          github-token: ${{ secrets.GITHUB_TOKEN }}
           script: |
             const owner = context.repo.owner;
             const repo = context.repo.repo;
