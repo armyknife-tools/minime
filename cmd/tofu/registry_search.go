@@ -5,26 +5,20 @@ package main
 
 import (
 	"context"
+	"encoding/json"
 	"flag"
 	"fmt"
-	"os"
-	"path/filepath"
 	"sort"
 	"strings"
 	"time"
 
-	"github.com/hashicorp/go-hclog"
 	"github.com/hashicorp/go-retryablehttp"
-	"github.com/hashicorp/terraform-svchost/disco"
 	"github.com/opentofu/opentofu/internal/command"
-	"github.com/opentofu/opentofu/internal/registry"
 	"github.com/opentofu/opentofu/internal/registry/regsrc"
 	"github.com/opentofu/opentofu/internal/registry/response"
-	"github.com/opentofu/opentofu/internal/tfdiags"
 )
 
-// RegistrySearchCommand is a Command implementation that searches the registry
-// for modules or providers.
+// RegistrySearchCommand is a CLI command for searching the registry
 type RegistrySearchCommand struct {
 	Meta command.Meta
 }
@@ -57,211 +51,256 @@ func (c *RegistrySearchCommand) Synopsis() string {
 }
 
 func (c *RegistrySearchCommand) Run(args []string) int {
-	var searchType string
-	var limit int
-	var jsonOutput bool
-	var detailed bool
-	var registryHost string
+	var typeFlag string
+	var limitFlag int
+	var jsonFlag bool
+	var detailedFlag bool
+	var registryFlag string
 
-	cmdFlags := flag.NewFlagSet("registry search", flag.ContinueOnError)
-	cmdFlags.StringVar(&searchType, "type", "module", "Type of resource to search for")
-	cmdFlags.IntVar(&limit, "limit", 10, "Limit the number of results")
-	cmdFlags.BoolVar(&jsonOutput, "json", false, "Output the results as JSON")
-	cmdFlags.BoolVar(&detailed, "detailed", false, "Show detailed information")
-	cmdFlags.StringVar(&registryHost, "registry", "", "Registry host")
-	cmdFlags.Usage = func() { c.Meta.Ui.Error(c.Help()) }
+	flags := flag.NewFlagSet("registry search", flag.ContinueOnError)
+	flags.StringVar(&typeFlag, "type", "module", "Type of resource to search for. Can be \"module\" or \"provider\"")
+	flags.IntVar(&limitFlag, "limit", 10, "Limit the number of results displayed")
+	flags.BoolVar(&jsonFlag, "json", false, "Output the results as JSON")
+	flags.BoolVar(&detailedFlag, "detailed", false, "Show detailed information about each result")
+	flags.StringVar(&registryFlag, "registry", "registry.terraform.io", "Use a custom registry host")
 
-	if err := cmdFlags.Parse(args); err != nil {
+	flags.Usage = func() { c.Meta.Ui.Error(c.Help()) }
+
+	if err := flags.Parse(args); err != nil {
+		if err == flag.ErrHelp {
+			return 0
+		}
+		c.Meta.Ui.Error(fmt.Sprintf("Error parsing command line arguments: %s", err))
 		return 1
 	}
 
-	args = cmdFlags.Args()
+	args = flags.Args()
 	if len(args) > 1 {
 		c.Meta.Ui.Error("The registry search command expects at most one argument.")
 		return 1
 	}
 
-	var query string
+	query := ""
 	if len(args) == 1 {
 		query = args[0]
 	}
 
 	// Check if the search type is valid
-	if searchType != "module" && searchType != "provider" {
-		c.Meta.Ui.Error(fmt.Sprintf("Invalid search type: %s. Must be 'module' or 'provider'.", searchType))
-		return 1
-	}
-
-	// Create a registry client
-	client, err := c.createRegistryClient()
-	if err != nil {
-		c.Meta.Ui.Error(fmt.Sprintf("Error initializing registry client: %s", err))
+	if typeFlag != "module" && typeFlag != "provider" {
+		c.Meta.Ui.Error(fmt.Sprintf("Invalid search type: %s. Must be 'module' or 'provider'.", typeFlag))
 		return 1
 	}
 
 	// If a registry host is specified, use it
 	var host *regsrc.FriendlyHost
-	if registryHost != "" {
-		host = regsrc.NewFriendlyHost(registryHost)
+	if registryFlag != "" {
+		host = regsrc.NewFriendlyHost(registryFlag)
 	} else {
 		// Use the default registry host
-		if searchType == "module" {
+		if typeFlag == "module" {
 			host = regsrc.PublicRegistryHost
 		} else {
 			host = regsrc.PublicRegistryHost // Same for providers
 		}
 	}
 
-	// Refresh the registry cache if needed
+	// Create a context for the search
 	ctx := context.Background()
-	diags := c.refreshRegistryIfNeeded(ctx, client, host)
-	if diags.HasErrors() {
-		c.Meta.Ui.Error(fmt.Sprintf("Error refreshing registry: %s", diags.Err()))
-		return 1
-	}
 
 	// Perform the search
-	if searchType == "module" {
-		return c.searchModules(ctx, client, host, query, limit, jsonOutput, detailed)
+	if typeFlag == "module" {
+		return c.searchModules(ctx, host, query, limitFlag, jsonFlag, detailedFlag)
 	} else {
-		return c.searchProviders(ctx, client, host, query, limit, jsonOutput, detailed)
+		return c.searchProviders(ctx, host, query, limitFlag, jsonFlag, detailedFlag)
 	}
 }
 
-// createRegistryClient creates a new registry client
-func (c *RegistrySearchCommand) createRegistryClient() (*registry.Client, error) {
-	// Create an HTTP client for the registry
-	httpClient := retryablehttp.NewClient()
-	httpClient.RetryMax = 3
-	httpClient.Logger = hclog.NewNullLogger()
-
-	// Create a services discovery client
-	services := disco.New()
-	services.SetUserAgent("OpenTofu")
-
-	// Create a registry client
-	client := registry.NewClient(services, httpClient.StandardClient())
-
-	// Set up caching
-	cacheDir := filepath.Join(os.TempDir(), "opentofu-registry-cache")
-	if err := os.MkdirAll(cacheDir, 0755); err != nil {
-		return nil, fmt.Errorf("failed to create registry cache directory: %w", err)
-	}
-
-	return client, nil
-}
-
-func (c *RegistrySearchCommand) refreshRegistryIfNeeded(ctx context.Context, client *registry.Client, host *regsrc.FriendlyHost) tfdiags.Diagnostics {
-	var diags tfdiags.Diagnostics
-
-	// Check if we need to refresh the registry
-	cacheFile := registry.CacheFilename("modules.json")
-	if registry.ShouldRefreshCache(cacheFile, 24*time.Hour) {
-		c.Meta.Ui.Output(fmt.Sprintf("Refreshing registry cache for %s...", host))
-		err := client.RefreshModules(ctx, host.String())
-		if err != nil {
-			diags = diags.Append(fmt.Errorf("Failed to refresh modules for %s: %s", host, err))
-		}
-	}
-
-	cacheFile = registry.CacheFilename("providers.json")
-	if registry.ShouldRefreshCache(cacheFile, 24*time.Hour) {
-		c.Meta.Ui.Output(fmt.Sprintf("Refreshing provider cache for %s...", host))
-		err := client.RefreshProviders(ctx, host.String())
-		if err != nil {
-			diags = diags.Append(fmt.Errorf("Failed to refresh providers for %s: %s", host, err))
-		}
-	}
-
-	return diags
-}
-
-func (c *RegistrySearchCommand) searchModules(ctx context.Context, client *registry.Client, host *regsrc.FriendlyHost, query string, limit int, jsonOutput, detailed bool) int {
-	// Get all modules from the registry
-	modules, err := client.GetModules(ctx, host.String())
+func (c *RegistrySearchCommand) searchModules(ctx context.Context, host *regsrc.FriendlyHost, query string, limit int, jsonOutput, detailed bool) int {
+	c.Meta.Ui.Output(fmt.Sprintf("Searching for modules matching '%s'...", query))
+	
+	// Use the registry client to search for modules
+	modules, err := c.directModuleSearch(ctx, host.String(), query)
 	if err != nil {
-		c.Meta.Ui.Error(fmt.Sprintf("Error fetching modules: %s", err))
+		c.Meta.Ui.Error(fmt.Sprintf("Error searching for modules: %s", err))
 		return 1
 	}
-
-	// Filter modules based on the query
-	var filteredModules []*response.Module
-	if query != "" {
+	
+	// Filter modules based on the query if needed
+	if query != "" && len(modules) > 0 {
+		filteredModules := make([]*response.Module, 0)
 		for _, module := range modules {
-			// Search in namespace, name, provider, and description
-			searchText := strings.ToLower(fmt.Sprintf("%s/%s/%s %s", 
-				module.Namespace, module.Name, module.Provider, module.Description))
-			if strings.Contains(searchText, strings.ToLower(query)) {
+			// Check if the module matches the query
+			moduleFullName := fmt.Sprintf("%s/%s/%s", module.Namespace, module.Name, module.Provider)
+			if strings.Contains(strings.ToLower(moduleFullName), strings.ToLower(query)) || 
+			   strings.Contains(strings.ToLower(module.Description), strings.ToLower(query)) {
 				filteredModules = append(filteredModules, module)
 			}
 		}
-	} else {
-		filteredModules = modules
+		modules = filteredModules
 	}
-
+	
 	// Sort modules by downloads (most popular first)
-	sort.Slice(filteredModules, func(i, j int) bool {
-		return filteredModules[i].Downloads > filteredModules[j].Downloads
+	sort.Slice(modules, func(i, j int) bool {
+		return modules[i].Downloads > modules[j].Downloads
 	})
-
+	
 	// Limit the number of results
-	if limit > 0 && limit < len(filteredModules) {
-		filteredModules = filteredModules[:limit]
+	if limit > 0 && len(modules) > limit {
+		modules = modules[:limit]
 	}
-
+	
 	// Output the results
 	if jsonOutput {
-		return c.outputModulesAsJSON(filteredModules)
-	} else {
-		return c.outputModulesAsText(filteredModules, detailed)
+		return c.outputModulesAsJSON(modules)
 	}
+	
+	return c.outputModulesAsText(modules, detailed)
 }
 
-func (c *RegistrySearchCommand) searchProviders(ctx context.Context, client *registry.Client, host *regsrc.FriendlyHost, query string, limit int, jsonOutput, detailed bool) int {
-	// Get all providers from the registry
-	providers, err := client.GetProviders(ctx, host.String())
+func (c *RegistrySearchCommand) searchProviders(ctx context.Context, host *regsrc.FriendlyHost, query string, limit int, jsonOutput, detailed bool) int {
+	c.Meta.Ui.Output(fmt.Sprintf("Searching for providers matching '%s'...", query))
+	
+	// Use the registry client to search for providers
+	providers, err := c.directProviderSearch(ctx, host.String(), query)
 	if err != nil {
-		c.Meta.Ui.Error(fmt.Sprintf("Error fetching providers: %s", err))
+		c.Meta.Ui.Error(fmt.Sprintf("Error searching for providers: %s", err))
 		return 1
 	}
-
-	// Filter providers based on the query
-	var filteredProviders []*response.ModuleProvider
-	if query != "" {
+	
+	// Filter providers based on the query if needed
+	if query != "" && len(providers) > 0 {
+		filteredProviders := make([]*response.ModuleProvider, 0)
 		for _, provider := range providers {
-			// Search in name
+			// Check if the provider matches the query
 			if strings.Contains(strings.ToLower(provider.Name), strings.ToLower(query)) {
 				filteredProviders = append(filteredProviders, provider)
 			}
 		}
-	} else {
-		filteredProviders = providers
+		providers = filteredProviders
 	}
-
+	
 	// Sort providers by downloads (most popular first)
-	sort.Slice(filteredProviders, func(i, j int) bool {
-		return filteredProviders[i].Downloads > filteredProviders[j].Downloads
+	sort.Slice(providers, func(i, j int) bool {
+		return providers[i].Downloads > providers[j].Downloads
 	})
-
+	
 	// Limit the number of results
-	if limit > 0 && limit < len(filteredProviders) {
-		filteredProviders = filteredProviders[:limit]
+	if limit > 0 && len(providers) > limit {
+		providers = providers[:limit]
 	}
-
+	
 	// Output the results
 	if jsonOutput {
-		return c.outputProvidersAsJSON(filteredProviders)
-	} else {
-		return c.outputProvidersAsText(filteredProviders, detailed)
+		return c.outputProvidersAsJSON(providers)
 	}
+	
+	return c.outputProvidersAsText(providers, detailed)
+}
+
+// directModuleSearch performs a direct API search for modules
+func (c *RegistrySearchCommand) directModuleSearch(ctx context.Context, host string, query string) ([]*response.Module, error) {
+	// Construct the API URL
+	apiURL := fmt.Sprintf("https://%s/v1/modules?q=%s&limit=100", host, query)
+	
+	// Create a new HTTP client
+	httpClient := retryablehttp.NewClient()
+	httpClient.RetryMax = 3
+	
+	// Create the request
+	req, err := retryablehttp.NewRequest("GET", apiURL, nil)
+	if err != nil {
+		return nil, err
+	}
+	
+	// Set headers
+	req.Header.Set("Accept", "application/json")
+	req.Header.Set("User-Agent", "OpenTofu")
+	
+	// Send the request
+	resp, err := httpClient.Do(req)
+	if err != nil {
+		return nil, err
+	}
+	defer resp.Body.Close()
+	
+	// Check the response status
+	if resp.StatusCode != 200 {
+		return nil, fmt.Errorf("API returned status code %d", resp.StatusCode)
+	}
+	
+	// Decode the response
+	var moduleList response.ModuleList
+	if err := json.NewDecoder(resp.Body).Decode(&moduleList); err != nil {
+		return nil, err
+	}
+	
+	return moduleList.Modules, nil
+}
+
+// directProviderSearch performs a direct API search for providers
+func (c *RegistrySearchCommand) directProviderSearch(ctx context.Context, host string, query string) ([]*response.ModuleProvider, error) {
+	// Construct the API URL
+	apiURL := fmt.Sprintf("https://%s/v1/providers?q=%s&limit=100", host, query)
+	
+	// Create a new HTTP client
+	httpClient := retryablehttp.NewClient()
+	httpClient.RetryMax = 3
+	
+	// Create the request
+	req, err := retryablehttp.NewRequest("GET", apiURL, nil)
+	if err != nil {
+		return nil, err
+	}
+	
+	// Set headers
+	req.Header.Set("Accept", "application/json")
+	req.Header.Set("User-Agent", "OpenTofu")
+	
+	// Send the request
+	resp, err := httpClient.Do(req)
+	if err != nil {
+		return nil, err
+	}
+	defer resp.Body.Close()
+	
+	// Check the response status
+	if resp.StatusCode != 200 {
+		return nil, fmt.Errorf("API returned status code %d", resp.StatusCode)
+	}
+	
+	// Decode the response
+	var providerList response.ModuleProviderList
+	if err := json.NewDecoder(resp.Body).Decode(&providerList); err != nil {
+		return nil, err
+	}
+	
+	return providerList.Providers, nil
 }
 
 func (c *RegistrySearchCommand) outputModulesAsJSON(modules []*response.Module) int {
-	// Output the results as JSON
+	// Sort modules by downloads (most popular first)
+	sort.Slice(modules, func(i, j int) bool {
+		return modules[i].Downloads > modules[j].Downloads
+	})
+
+	// Create a more structured JSON output with metadata
 	jsonOutput := map[string]interface{}{
+		"count":   len(modules),
 		"modules": modules,
+		"metadata": map[string]interface{}{
+			"timestamp": time.Now().Format(time.RFC3339),
+			"query":     "modules",
+		},
 	}
-	c.Meta.Ui.Output(fmt.Sprintf("%v", jsonOutput))
+	
+	// Convert to JSON with proper indentation
+	jsonData, err := json.MarshalIndent(jsonOutput, "", "  ")
+	if err != nil {
+		c.Meta.Ui.Error(fmt.Sprintf("Error formatting JSON: %s", err))
+		return 1
+	}
+	
+	c.Meta.Ui.Output(string(jsonData))
 	return 0
 }
 
@@ -271,34 +310,111 @@ func (c *RegistrySearchCommand) outputModulesAsText(modules []*response.Module, 
 		return 0
 	}
 
-	c.Meta.Ui.Output(fmt.Sprintf("Found %d matching modules:", len(modules)))
+	// Create a header with count and formatting
+	c.Meta.Ui.Output(fmt.Sprintf("\n%s %d matching modules %s", 
+		strings.Repeat("=", 10),
+		len(modules),
+		strings.Repeat("=", 10)))
 	c.Meta.Ui.Output("")
 
-	for _, module := range modules {
-		c.Meta.Ui.Output(fmt.Sprintf("* %s/%s/%s", module.Namespace, module.Name, module.Provider))
+	// Sort modules by downloads (most popular first)
+	sort.Slice(modules, func(i, j int) bool {
+		return modules[i].Downloads > modules[j].Downloads
+	})
+
+	for i, module := range modules {
+		// Create a visually distinct module entry with index
+		c.Meta.Ui.Output(fmt.Sprintf("%d. \033[1m%s/%s/%s\033[0m", 
+			i+1, module.Namespace, module.Name, module.Provider))
 		
+		// Always show a brief description if available
+		if module.Description != "" {
+			// Truncate description if it's too long
+			desc := module.Description
+			if len(desc) > 80 && !detailed {
+				desc = desc[:77] + "..."
+			}
+			c.Meta.Ui.Output(fmt.Sprintf("   \033[3m%s\033[0m", desc))
+		}
+
+		// Show basic stats in a compact format
+		downloadStr := fmt.Sprintf("%d", module.Downloads)
+		if module.Downloads > 1000 {
+			downloadStr = fmt.Sprintf("%.1fk", float64(module.Downloads)/1000)
+		}
+		
+		verifiedBadge := ""
+		if module.Verified {
+			verifiedBadge = "✓ Verified"
+		}
+		
+		versionInfo := ""
+		if len(module.Version) > 0 {
+			versionInfo = fmt.Sprintf("v%s", module.Version)
+		}
+		
+		stats := []string{}
+		if downloadStr != "" {
+			stats = append(stats, fmt.Sprintf("Downloads: %s", downloadStr))
+		}
+		if versionInfo != "" {
+			stats = append(stats, versionInfo)
+		}
+		if verifiedBadge != "" {
+			stats = append(stats, verifiedBadge)
+		}
+		
+		c.Meta.Ui.Output(fmt.Sprintf("   \033[2m%s\033[0m", strings.Join(stats, " | ")))
+
+		// Show additional details if requested
 		if detailed {
-			if module.Description != "" {
-				c.Meta.Ui.Output(fmt.Sprintf("    Description: %s", module.Description))
-			}
-			c.Meta.Ui.Output(fmt.Sprintf("    Downloads: %d", module.Downloads))
-			c.Meta.Ui.Output(fmt.Sprintf("    Verified: %t", module.Verified))
-			if len(module.Version) > 0 {
-				c.Meta.Ui.Output(fmt.Sprintf("    Latest Version: %s", module.Version))
-			}
 			c.Meta.Ui.Output("")
+			c.Meta.Ui.Output(fmt.Sprintf("   Published: %s", module.PublishedAt.Format("Jan 02, 2006")))
+			if module.Source != "" {
+				c.Meta.Ui.Output(fmt.Sprintf("   Source: %s", module.Source))
+			}
+			c.Meta.Ui.Output(fmt.Sprintf("   ID: %s", module.ID))
+		}
+		
+		// Add separator between modules
+		if i < len(modules)-1 {
+			c.Meta.Ui.Output(fmt.Sprintf("\n%s\n", strings.Repeat("-", 50)))
 		}
 	}
+
+	// Add usage hint at the end
+	c.Meta.Ui.Output(fmt.Sprintf("\n%s", strings.Repeat("=", 30)))
+	c.Meta.Ui.Output("To install a module, run:")
+	c.Meta.Ui.Output("  tofu install module <namespace>/<name>/<provider>")
+	c.Meta.Ui.Output("For more details, use the -detailed flag")
 
 	return 0
 }
 
 func (c *RegistrySearchCommand) outputProvidersAsJSON(providers []*response.ModuleProvider) int {
-	// Output the results as JSON
+	// Sort providers by downloads (most popular first)
+	sort.Slice(providers, func(i, j int) bool {
+		return providers[i].Downloads > providers[j].Downloads
+	})
+
+	// Create a more structured JSON output with metadata
 	jsonOutput := map[string]interface{}{
+		"count":     len(providers),
 		"providers": providers,
+		"metadata": map[string]interface{}{
+			"timestamp": time.Now().Format(time.RFC3339),
+			"query":     "providers",
+		},
 	}
-	c.Meta.Ui.Output(fmt.Sprintf("%v", jsonOutput))
+	
+	// Convert to JSON with proper indentation
+	jsonData, err := json.MarshalIndent(jsonOutput, "", "  ")
+	if err != nil {
+		c.Meta.Ui.Error(fmt.Sprintf("Error formatting JSON: %s", err))
+		return 1
+	}
+	
+	c.Meta.Ui.Output(string(jsonData))
 	return 0
 }
 
@@ -308,18 +424,76 @@ func (c *RegistrySearchCommand) outputProvidersAsText(providers []*response.Modu
 		return 0
 	}
 
-	c.Meta.Ui.Output(fmt.Sprintf("Found %d matching providers:", len(providers)))
+	// Create a header with count and formatting
+	c.Meta.Ui.Output(fmt.Sprintf("\n%s %d matching providers %s", 
+		strings.Repeat("=", 10),
+		len(providers),
+		strings.Repeat("=", 10)))
 	c.Meta.Ui.Output("")
 
-	for _, provider := range providers {
-		c.Meta.Ui.Output(fmt.Sprintf("* %s", provider.Name))
+	// Sort providers by downloads (most popular first)
+	sort.Slice(providers, func(i, j int) bool {
+		return providers[i].Downloads > providers[j].Downloads
+	})
+
+	for i, provider := range providers {
+		// Parse provider name to extract namespace and type if possible
+		parts := strings.Split(provider.Name, "/")
+		displayName := provider.Name
 		
+		// Create a visually distinct provider entry with index
+		c.Meta.Ui.Output(fmt.Sprintf("%d. \033[1m%s\033[0m", i+1, displayName))
+		
+		// Show basic stats in a compact format
+		downloadStr := fmt.Sprintf("%d", provider.Downloads)
+		if provider.Downloads > 1000 {
+			downloadStr = fmt.Sprintf("%.1fk", float64(provider.Downloads)/1000)
+		}
+		
+		moduleCountStr := fmt.Sprintf("%d modules", provider.ModuleCount)
+		if provider.ModuleCount == 1 {
+			moduleCountStr = "1 module"
+		}
+		
+		stats := []string{}
+		if downloadStr != "" {
+			stats = append(stats, fmt.Sprintf("Downloads: %s", downloadStr))
+		}
+		if moduleCountStr != "" {
+			stats = append(stats, moduleCountStr)
+		}
+		
+		// If we have namespace information, display it
+		if len(parts) > 1 {
+			stats = append(stats, fmt.Sprintf("Namespace: %s", parts[0]))
+		}
+		
+		c.Meta.Ui.Output(fmt.Sprintf("   \033[2m%s\033[0m", strings.Join(stats, " | ")))
+		
+		// Show additional details if requested
 		if detailed {
-			c.Meta.Ui.Output(fmt.Sprintf("    Downloads: %d", provider.Downloads))
-			c.Meta.Ui.Output(fmt.Sprintf("    Module Count: %d", provider.ModuleCount))
 			c.Meta.Ui.Output("")
+			// If we have more detailed provider information, display it here
+			// This could be expanded in the future as more provider data becomes available
+		}
+		
+		// Add separator between providers
+		if i < len(providers)-1 {
+			c.Meta.Ui.Output(fmt.Sprintf("\n%s\n", strings.Repeat("-", 50)))
 		}
 	}
+
+	// Add usage hint at the end
+	c.Meta.Ui.Output(fmt.Sprintf("\n%s", strings.Repeat("=", 30)))
+	c.Meta.Ui.Output("To use a provider, include it in your configuration:")
+	c.Meta.Ui.Output("  terraform {")
+	c.Meta.Ui.Output("    required_providers {")
+	c.Meta.Ui.Output("      <name> = {")
+	c.Meta.Ui.Output("        source = \"<provider-address>\"")
+	c.Meta.Ui.Output("      }")
+	c.Meta.Ui.Output("    }")
+	c.Meta.Ui.Output("  }")
+	c.Meta.Ui.Output("For more details, use the -detailed flag")
 
 	return 0
 }
