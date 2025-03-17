@@ -150,23 +150,23 @@ const DefaultSystemPrompt = `You are an expert in infrastructure as code, specia
 Follow these guidelines:
 1. Generate all necessary files for a complete OpenTofu project, including provider configurations, variables, outputs, and resources.
 2. Use best practices for OpenTofu code organization, security, and maintainability.
-3. Include helpful comments in the code to explain your design decisions.
-4. Always use "opentofu" instead of "terraform" in any documentation or comments, but use the correct provider names (e.g., "aws", "google", "azurerm") in the provider blocks.
+3. IMPORTANT: DO NOT include any comments in the code. Return ONLY the code itself.
+4. Always use "opentofu" instead of "terraform" in any file names, but use the correct provider names (e.g., "aws", "google", "azurerm") in the provider blocks.
 5. Structure your response as a set of files with their contents.
-6. Include a README.md with instructions on how to use the configuration.
-7. Provide a brief explanation of the architecture and design choices.
+6. DO NOT include a README.md or any documentation files.
+7. DO NOT provide any explanation of the architecture or design choices.
 8. For complex infrastructure (like load balancers, auto-scaling groups, etc.), organize resources logically across multiple files.
 9. Include proper networking configuration (VPCs, subnets, security groups) when creating compute resources.
 10. Set sensible defaults for variables but make important parameters configurable.
 11. Follow the principle of least privilege for IAM roles and security groups.
-12. Include proper error handling and dependency management between resources.
+12. Include proper dependency management between resources.
 13. When appropriate, leverage modules from the OpenTofu Registry (which contains approximately 18,000 modules) to follow best practices and reduce code duplication.
 14. Specify required provider versions from the OpenTofu Registry (which contains approximately 4,000 providers) to ensure compatibility.
 15. IMPORTANT: OpenTofu is the tool (like Terraform), not a provider. Use the correct provider names like "aws", "google", "azurerm", etc. in provider blocks.
 
-For each file, start with "--- filename.tf ---" or "--- filename.md ---" on a line by itself, followed by the file content, and end with "---" on a line by itself.
+For each file, start with "--- filename.tf ---" on a line by itself, followed by the file content, and end with "---" on a line by itself.
 
-After all files, provide a brief explanation of the generated configuration, key design decisions, and any assumptions you made.`
+DO NOT include any dialog, explanations, or comments in your response. Return ONLY the code files with their contents.`
 
 func (c *AICommand) Run(args []string) int {
 	var providerFlag, modelFlag, outputFlag, apiKeyFlag, apiURLFlag, registryDBFlag string
@@ -310,6 +310,25 @@ Additionally, consider using the following information from the OpenTofu Registr
 	if err != nil {
 		c.Meta.Ui.Error(fmt.Sprintf("Error generating configuration: %s", err))
 		return 1
+	}
+
+	// Clean up file content before writing
+	for filename, content := range result.Files {
+		// Remove file header markers (--- filename.tf ---)
+		fileHeaderRegex := regexp.MustCompile(fmt.Sprintf(`(?m)^---\s*%s\s*---\s*$`, regexp.QuoteMeta(filename)))
+		content = fileHeaderRegex.ReplaceAllString(content, "")
+		
+		// Remove any other file header markers
+		content = regexp.MustCompile(`(?m)^---\s*[\w\-\.\/]+\s*---\s*$`).ReplaceAllString(content, "")
+		
+		// Remove any trailing --- markers
+		content = regexp.MustCompile(`(?m)^---\s*$`).ReplaceAllString(content, "")
+		
+		// Clean up whitespace
+		content = regexp.MustCompile(`(?m)^\n\n+`).ReplaceAllString(content, "\n")
+		content = strings.TrimSpace(content)
+		
+		result.Files[filename] = content
 	}
 
 	// Write generated files
@@ -504,6 +523,26 @@ func extractFilesFromText(text string) (*GenerationResult, error) {
 			if len(match) >= 3 {
 				filename := strings.TrimSpace(match[1])
 				content := strings.TrimSpace(match[2])
+				
+				// Remove any markdown code block markers
+				content = regexp.MustCompile("(?m)^```(?:terraform|hcl)?$").ReplaceAllString(content, "")
+				content = regexp.MustCompile("(?m)^```$").ReplaceAllString(content, "")
+				
+				// Remove any comments that might have been added despite instructions
+				content = regexp.MustCompile("(?m)^\\s*#.*$").ReplaceAllString(content, "")
+				content = regexp.MustCompile("(?m)^\\s*//.*$").ReplaceAllString(content, "")
+				content = regexp.MustCompile("(?m)/\\*.*?\\*/").ReplaceAllString(content, "")
+				
+				// Remove any dialog or explanation text that might be mixed with code
+				content = regexp.MustCompile("(?i)(?m)^(Note:|Here's|This file|As you can see|Let me|I've|I have|This creates|This sets up).*$").ReplaceAllString(content, "")
+				
+				// Remove any --- markers that might be included in the content
+				content = regexp.MustCompile("(?m)^---\\s*$").ReplaceAllString(content, "")
+				
+				// Clean up any extra whitespace
+				content = regexp.MustCompile("(?m)^\n\n+").ReplaceAllString(content, "\n")
+				content = strings.TrimSpace(content)
+				
 				result.Files[filename] = content
 			}
 		}
@@ -523,13 +562,42 @@ func extractFilesFromText(text string) (*GenerationResult, error) {
 			// For Ollama output, we typically get a single code block with the entire configuration
 			// Extract it as main.tf
 			content := strings.TrimSpace(markdownMatches[0][1])
+			
+			// Clean up the content
+			content = regexp.MustCompile("(?m)^\\s*#.*$").ReplaceAllString(content, "")
+			content = regexp.MustCompile("(?m)^\\s*//.*$").ReplaceAllString(content, "")
+			content = regexp.MustCompile("(?m)/\\*.*?\\*/").ReplaceAllString(content, "")
+			content = regexp.MustCompile("(?i)(?m)^(Note:|Here's|This file|As you can see|Let me|I've|I have|This creates|This sets up).*$").ReplaceAllString(content, "")
+			
+			// Remove any --- markers that might be included in the content
+			content = regexp.MustCompile("(?m)^---\\s*$").ReplaceAllString(content, "")
+			
+			// Clean up any extra whitespace
+			content = regexp.MustCompile("(?m)^\n\n+").ReplaceAllString(content, "\n")
+			content = strings.TrimSpace(content)
+			
 			result.Files["main.tf"] = content
 			
 			// Check if there are any other code blocks that might be separate files
 			if len(markdownMatches) > 1 {
 				for i, match := range markdownMatches[1:] {
 					if len(match) >= 2 {
-						result.Files[fmt.Sprintf("file%d.tf", i+1)] = strings.TrimSpace(match[1])
+						fileContent := strings.TrimSpace(match[1])
+						
+						// Clean up the content
+						fileContent = regexp.MustCompile("(?m)^\\s*#.*$").ReplaceAllString(fileContent, "")
+						fileContent = regexp.MustCompile("(?m)^\\s*//.*$").ReplaceAllString(fileContent, "")
+						fileContent = regexp.MustCompile("(?m)/\\*.*?\\*/").ReplaceAllString(fileContent, "")
+						fileContent = regexp.MustCompile("(?i)(?m)^(Note:|Here's|This file|As you can see|Let me|I've|I have|This creates|This sets up).*$").ReplaceAllString(fileContent, "")
+						
+						// Remove any --- markers that might be included in the content
+						fileContent = regexp.MustCompile("(?m)^---\\s*$").ReplaceAllString(fileContent, "")
+						
+						// Clean up any extra whitespace
+						fileContent = regexp.MustCompile("(?m)^\n\n+").ReplaceAllString(fileContent, "\n")
+						fileContent = strings.TrimSpace(fileContent)
+						
+						result.Files[fmt.Sprintf("file%d.tf", i+1)] = fileContent
 					}
 				}
 			}
@@ -552,7 +620,22 @@ func extractFilesFromText(text string) (*GenerationResult, error) {
 				strings.Contains(line, ".md") || strings.Contains(line, ".txt")) {
 					// If we were collecting a file, save it
 					if currentFile != "" && currentContent.Len() > 0 {
-						result.Files[currentFile] = currentContent.String()
+						fileContent := currentContent.String()
+						
+						// Clean up the content
+						fileContent = regexp.MustCompile("(?m)^\\s*#.*$").ReplaceAllString(fileContent, "")
+						fileContent = regexp.MustCompile("(?m)^\\s*//.*$").ReplaceAllString(fileContent, "")
+						fileContent = regexp.MustCompile("(?m)/\\*.*?\\*/").ReplaceAllString(fileContent, "")
+						fileContent = regexp.MustCompile("(?i)(?m)^(Note:|Here's|This file|As you can see|Let me|I've|I have|This creates|This sets up).*$").ReplaceAllString(fileContent, "")
+						
+						// Remove any --- markers that might be included in the content
+						fileContent = regexp.MustCompile("(?m)^---\\s*$").ReplaceAllString(fileContent, "")
+						
+						// Clean up any extra whitespace
+						fileContent = regexp.MustCompile("(?m)^\n\n+").ReplaceAllString(fileContent, "\n")
+						fileContent = strings.TrimSpace(fileContent)
+						
+						result.Files[currentFile] = fileContent
 						currentContent.Reset()
 					}
 					
@@ -589,7 +672,22 @@ func extractFilesFromText(text string) (*GenerationResult, error) {
 			
 			// Save the last file if there is one
 			if currentFile != "" && currentContent.Len() > 0 {
-				result.Files[currentFile] = currentContent.String()
+				fileContent := currentContent.String()
+				
+				// Clean up the content
+				fileContent = regexp.MustCompile("(?m)^\\s*#.*$").ReplaceAllString(fileContent, "")
+				fileContent = regexp.MustCompile("(?m)^\\s*//.*$").ReplaceAllString(fileContent, "")
+				fileContent = regexp.MustCompile("(?m)/\\*.*?\\*/").ReplaceAllString(fileContent, "")
+				fileContent = regexp.MustCompile("(?i)(?m)^(Note:|Here's|This file|As you can see|Let me|I've|I have|This creates|This sets up).*$").ReplaceAllString(fileContent, "")
+				
+				// Remove any --- markers that might be included in the content
+				fileContent = regexp.MustCompile("(?m)^---\\s*$").ReplaceAllString(fileContent, "")
+				
+				// Clean up any extra whitespace
+				fileContent = regexp.MustCompile("(?m)^\n\n+").ReplaceAllString(fileContent, "\n")
+				fileContent = strings.TrimSpace(fileContent)
+				
+				result.Files[currentFile] = fileContent
 			}
 			
 			// Set the explanation
@@ -599,7 +697,20 @@ func extractFilesFromText(text string) (*GenerationResult, error) {
 			
 			// If we didn't find any files, use the entire text as main.tf
 			if len(result.Files) == 0 {
-				result.Files["main.tf"] = text
+				// Clean up the content
+				cleanText := regexp.MustCompile("(?m)^\\s*#.*$").ReplaceAllString(text, "")
+				cleanText = regexp.MustCompile("(?m)^\\s*//.*$").ReplaceAllString(cleanText, "")
+				cleanText = regexp.MustCompile("(?m)/\\*.*?\\*/").ReplaceAllString(cleanText, "")
+				cleanText = regexp.MustCompile("(?i)(?m)^(Note:|Here's|This file|As you can see|Let me|I've|I have|This creates|This sets up).*$").ReplaceAllString(cleanText, "")
+				
+				// Remove any --- markers that might be included in the content
+				cleanText = regexp.MustCompile("(?m)^---\\s*$").ReplaceAllString(cleanText, "")
+				
+				// Clean up any extra whitespace
+				cleanText = regexp.MustCompile("(?m)^\n\n+").ReplaceAllString(cleanText, "\n")
+				cleanText = strings.TrimSpace(cleanText)
+				
+				result.Files["main.tf"] = cleanText
 			}
 		}
 	}
