@@ -137,6 +137,12 @@ TOFU_DB_TYPE=sqlite
 		}
 	}
 
+	// Setup Git LFS
+	if err := c.setupGitLFS(); err != nil {
+		c.Meta.Ui.Error(fmt.Sprintf("Error setting up Git LFS: %s", err))
+		return 1
+	}
+
 	// Display completion message
 	c.Meta.Ui.Output("\n=== Setup Complete ===")
 	c.Meta.Ui.Output("\nYour OpenTofu development environment is now ready.")
@@ -147,6 +153,72 @@ TOFU_DB_TYPE=sqlite
 	c.Meta.Ui.Output("  tofu db migrate    - Migrate database schema")
 	
 	return 0
+}
+
+// setupGitLFS initializes Git LFS for the repository
+func (c *SetupCommand) setupGitLFS() error {
+	c.Meta.Ui.Info("Setting up Git LFS...")
+	
+	// Check if Git LFS is installed
+	cmd := exec.Command("git", "lfs", "version")
+	if err := cmd.Run(); err != nil {
+		c.Meta.Ui.Warn("Git LFS is not installed or not in PATH")
+		c.Meta.Ui.Warn("Please install Git LFS using your package manager:")
+		
+		switch runtime.GOOS {
+		case "darwin":
+			c.Meta.Ui.Warn("  brew install git-lfs")
+		case "linux":
+			c.Meta.Ui.Warn("  apt-get install git-lfs  # Debian/Ubuntu")
+			c.Meta.Ui.Warn("  dnf install git-lfs      # Fedora")
+			c.Meta.Ui.Warn("  yum install git-lfs      # CentOS/RHEL")
+			c.Meta.Ui.Warn("  pacman -S git-lfs        # Arch Linux")
+		case "windows":
+			c.Meta.Ui.Warn("  choco install git-lfs    # Using Chocolatey")
+			c.Meta.Ui.Warn("  scoop install git-lfs    # Using Scoop")
+		}
+		
+		c.Meta.Ui.Warn("After installing, run 'git lfs install' to set up Git LFS")
+		return fmt.Errorf("Git LFS is required for this project")
+	}
+	
+	// Initialize Git LFS
+	c.Meta.Ui.Info("Initializing Git LFS...")
+	cmd = exec.Command("git", "lfs", "install")
+	if err := cmd.Run(); err != nil {
+		return fmt.Errorf("Error initializing Git LFS: %s", err)
+	}
+	
+	// Configure Git LFS to track large files
+	c.Meta.Ui.Info("Configuring Git LFS to track large files...")
+	
+	// Track common large file types
+	fileTypes := []string{
+		"*.zip", "*.gz", "*.tar", "*.tgz",
+		"*.rar", "*.7z", "*.bz2", "*.xz",
+		"*.pdf", "*.bin", "*.exe", "*.dll",
+		"*.so", "*.dylib", "*.jar", "*.war",
+		"*.iso", "*.img", "*.dmg",
+		"*.psd", "*.ai", "*.svg",
+		"*.mp4", "*.mov", "*.avi", "*.mkv",
+		"*.mp3", "*.wav", "*.flac",
+	}
+	
+	for _, fileType := range fileTypes {
+		cmd = exec.Command("git", "lfs", "track", fileType)
+		if err := cmd.Run(); err != nil {
+			c.Meta.Ui.Warn(fmt.Sprintf("Error tracking %s with Git LFS: %s", fileType, err))
+		}
+	}
+	
+	// Add .gitattributes file to git
+	cmd = exec.Command("git", "add", ".gitattributes")
+	if err := cmd.Run(); err != nil {
+		c.Meta.Ui.Warn(fmt.Sprintf("Error adding .gitattributes to git: %s", err))
+	}
+	
+	c.Meta.Ui.Info("Git LFS setup complete")
+	return nil
 }
 
 // installDevelopmentTools installs necessary development tools
