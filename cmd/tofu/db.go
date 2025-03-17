@@ -295,6 +295,10 @@ func createSQLiteSchema(db *sql.DB) error {
 			id INTEGER PRIMARY KEY AUTOINCREMENT,
 			provider TEXT NOT NULL,
 			resource TEXT NOT NULL,
+			display_name TEXT,
+			description TEXT,
+			category TEXT,
+			tags TEXT,
 			content TEXT NOT NULL,
 			created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
 			updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
@@ -324,6 +328,10 @@ func createPostgresSchema(db *sql.DB) error {
 			id SERIAL PRIMARY KEY,
 			provider TEXT NOT NULL,
 			resource TEXT NOT NULL,
+			display_name TEXT NOT NULL,
+			description TEXT NOT NULL,
+			category TEXT NOT NULL,
+			tags TEXT NOT NULL,
 			content TEXT NOT NULL,
 			created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
 			updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP

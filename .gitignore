@@ -42,6 +42,7 @@ tmp
 
 # Environment variables
 .env
+.env.backup
 
 # Archive folder
 archive/
