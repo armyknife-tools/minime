@@ -33,6 +33,7 @@ import (
 	"go.opentelemetry.io/otel/trace"
 
 	backendInit "github.com/opentofu/opentofu/internal/backend/init"
+	"github.com/opentofu/opentofu/internal/dotenv"
 )
 
 const (
@@ -70,6 +71,12 @@ func realMain() int {
 	defer logging.PanicHandler()
 
 	var err error
+
+	// Load environment variables from .env file
+	_, err = dotenv.Load("")
+	if err != nil {
+		log.Printf("[WARN] Error loading .env file: %s", err)
+	}
 
 	err = openTelemetryInit()
 	if err != nil {

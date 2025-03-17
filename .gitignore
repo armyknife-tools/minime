@@ -39,3 +39,26 @@ dist/
 
 # Development temp folder
 tmp
+
+# Environment variables
+.env
+
+# Archive folder
+archive/
+
+# Test files and folders
+test-*
+*test*
+test_*
+*_test*
+
+# Search-related files
+*search*
+*-search*
+*search-*
+*-search-*
+colored-*
+*-provider-*
+*-module-*
+fetch-data.sh
+install-search.sh

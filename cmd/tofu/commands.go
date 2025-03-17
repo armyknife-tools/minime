@@ -317,6 +317,36 @@ func initCommands(
 				Meta: meta,
 			}, nil
 		},
+		"db": func() (cli.Command, error) {
+			return &DBCommand{
+				Meta: meta,
+			}, nil
+		},
+		"db setup": func() (cli.Command, error) {
+			return &DBSetupCommand{
+				Meta: meta,
+			}, nil
+		},
+		"db configure": func() (cli.Command, error) {
+			return &DBConfigureCommand{
+				Meta: meta,
+			}, nil
+		},
+		"db test": func() (cli.Command, error) {
+			return &DBTestCommand{
+				Meta: meta,
+			}, nil
+		},
+		"db migrate": func() (cli.Command, error) {
+			return &DBMigrateCommand{
+				Meta: meta,
+			}, nil
+		},
+		"setup": func() (cli.Command, error) {
+			return &SetupCommand{
+				Meta: meta,
+			}, nil
+		},
 		"show": func() (cli.Command, error) {
 			return &command.ShowCommand{
 				Meta: meta,
@@ -484,6 +514,7 @@ func initCommands(
 	}
 
 	primaryCommands = []string{
+		"setup",
 		"init",
 		"validate",
 		"plan",

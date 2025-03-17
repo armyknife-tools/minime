@@ -285,9 +285,3 @@ func (tdb *TemplateDB) GetTemplateContent(provider, resource string) (string, er
 
 	return content, nil
 }
-
-// Helper function to check if a file exists
-func fileExists(filename string) bool {
-	_, err := os.Stat(filename)
-	return err == nil
-}
