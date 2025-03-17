@@ -56,6 +56,11 @@ func (u *ui) Warn(msg string) {
 }
 
 func init() {
+	// Load environment variables from .env file before anything else
+	if _, err := dotenv.Load(""); err != nil {
+		log.Printf("[WARN] Error loading .env file: %s", err)
+	}
+
 	Ui = &ui{&cli.BasicUi{
 		Writer:      os.Stdout,
 		ErrorWriter: os.Stderr,
@@ -71,12 +76,6 @@ func realMain() int {
 	defer logging.PanicHandler()
 
 	var err error
-
-	// Load environment variables from .env file
-	_, err = dotenv.Load("")
-	if err != nil {
-		log.Printf("[WARN] Error loading .env file: %s", err)
-	}
 
 	err = openTelemetryInit()
 	if err != nil {

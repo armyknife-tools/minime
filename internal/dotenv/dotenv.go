@@ -13,25 +13,80 @@ import (
 )
 
 // Load loads environment variables from a .env file
-// If path is empty, it looks for .env in the current directory
+// If path is empty, it looks for .env in the current directory and binary directory
 // Variables are loaded in the format KEY=VALUE
 // Returns a map of the loaded variables
 func Load(path string) (map[string]string, error) {
 	loadedVars := make(map[string]string)
 	
-	// If the path is empty, look for .env in the current directory
+	// If the path is empty, look for .env in multiple locations
 	if path == "" {
+		// Try current directory first
 		cwd, err := os.Getwd()
 		if err != nil {
 			return nil, fmt.Errorf("error getting current working directory: %v", err)
 		}
-		path = filepath.Join(cwd, ".env")
+		cwdEnvPath := filepath.Join(cwd, ".env")
+		
+		// Try to load from current directory
+		if vars, err := loadFile(cwdEnvPath); err == nil {
+			for k, v := range vars {
+				loadedVars[k] = v
+			}
+			return loadedVars, nil
+		}
+		
+		// If not found in current directory, try binary directory
+		if exePath, err := os.Executable(); err == nil {
+			binaryDir := filepath.Dir(exePath)
+			binaryEnvPath := filepath.Join(binaryDir, ".env")
+			
+			// Try to load from binary directory
+			if vars, err := loadFile(binaryEnvPath); err == nil {
+				for k, v := range vars {
+					loadedVars[k] = v
+				}
+				return loadedVars, nil
+			}
+		}
+		
+		// Also try one directory up from binary (for development scenarios)
+		if exePath, err := os.Executable(); err == nil {
+			parentDir := filepath.Dir(filepath.Dir(exePath))
+			parentEnvPath := filepath.Join(parentDir, ".env")
+			
+			// Try to load from parent directory
+			if vars, err := loadFile(parentEnvPath); err == nil {
+				for k, v := range vars {
+					loadedVars[k] = v
+				}
+				return loadedVars, nil
+			}
+		}
+		
+		// No .env file found in any location
+		return loadedVars, nil
 	}
 
+	// If path is specified, load from that path
+	vars, err := loadFile(path)
+	if err != nil {
+		return loadedVars, err
+	}
+	for k, v := range vars {
+		loadedVars[k] = v
+	}
+	
+	return loadedVars, nil
+}
+
+// loadFile loads environment variables from a specific file path
+func loadFile(path string) (map[string]string, error) {
+	loadedVars := make(map[string]string)
+	
 	// Check if the file exists
 	if _, err := os.Stat(path); os.IsNotExist(err) {
-		// File doesn't exist, but that's not an error
-		return loadedVars, nil
+		return nil, fmt.Errorf("file does not exist: %s", path)
 	}
 
 	// Open the file

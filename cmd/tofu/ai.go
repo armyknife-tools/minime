@@ -10,6 +10,7 @@ import (
 	"flag"
 	"fmt"
 	"io"
+	"math"
 	"net/http"
 	"os"
 	"path/filepath"
@@ -17,6 +18,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/mitchellh/cli"
 	"github.com/opentofu/opentofu/internal/command"
 )
 
@@ -39,7 +41,7 @@ Options:
   -provider=name         AI provider to use. Valid values are "anthropic" and "ollama".
                          Default is "anthropic".
 
-  -model=name            Model to use. For Anthropic, defaults to "claude-3-haiku-20240307".
+  -model=name            Model to use. For Anthropic, defaults to "claude-3-7-sonnet-20250219".
                          For Ollama, defaults to "llama3".
 
   -output=path           Directory where the generated files will be saved.
@@ -54,7 +56,7 @@ Options:
 
   -max-tokens=n          Maximum number of tokens to generate. Default is 4000.
 
-  -temperature=n         Temperature for generation (0.0-1.0). Default is 0.7.
+  -temperature=n         Temperature for generation (0.0-1.0). Default is 0.3.
 
   -use-registry          If specified, the command will use the OpenTofu Registry to
                          look up available providers and modules to enhance the generated
@@ -115,15 +117,21 @@ type AnthropicRequest struct {
 	Temperature float64            `json:"temperature"`
 }
 
-// AnthropicContentItem represents a content item in the Anthropic API response
-type AnthropicContentItem struct {
-	Type string `json:"type"`
-	Text string `json:"text"`
-}
-
 // AnthropicResponse represents a response from the Anthropic API
 type AnthropicResponse struct {
-	Content []AnthropicContentItem `json:"content"`
+	Content []struct {
+		Type string `json:"type"`
+		Text string `json:"text"`
+	} `json:"content"`
+	Role       string `json:"role"`
+	Model      string `json:"model"`
+	StopReason string `json:"stop_reason"`
+	Id         string `json:"id"`
+	Type       string `json:"type"`
+	Usage      struct {
+		InputTokens  int `json:"input_tokens"`
+		OutputTokens int `json:"output_tokens"`
+	} `json:"usage"`
 }
 
 // OllamaRequest represents a request to the Ollama API
@@ -147,26 +155,79 @@ type OllamaResponse struct {
 // DefaultSystemPrompt is the default system prompt used for generating OpenTofu configurations
 const DefaultSystemPrompt = `You are an expert in infrastructure as code, specializing in OpenTofu (a fork of Terraform). Your task is to generate complete, working OpenTofu configurations based on user requests.
 
-Follow these guidelines:
-1. Generate all necessary files for a complete OpenTofu project, including provider configurations, variables, outputs, and resources.
-2. Use best practices for OpenTofu code organization, security, and maintainability.
-3. IMPORTANT: DO NOT include any comments in the code. Return ONLY the code itself.
-4. Always use "opentofu" instead of "terraform" in any file names, but use the correct provider names (e.g., "aws", "google", "azurerm") in the provider blocks.
-5. Structure your response as a set of files with their contents.
-6. DO NOT include a README.md or any documentation files.
-7. DO NOT provide any explanation of the architecture or design choices.
-8. For complex infrastructure (like load balancers, auto-scaling groups, etc.), organize resources logically across multiple files.
-9. Include proper networking configuration (VPCs, subnets, security groups) when creating compute resources.
-10. Set sensible defaults for variables but make important parameters configurable.
-11. Follow the principle of least privilege for IAM roles and security groups.
-12. Include proper dependency management between resources.
-13. When appropriate, leverage modules from the OpenTofu Registry (which contains approximately 18,000 modules) to follow best practices and reduce code duplication.
-14. Specify required provider versions from the OpenTofu Registry (which contains approximately 4,000 providers) to ensure compatibility.
-15. IMPORTANT: OpenTofu is the tool (like Terraform), not a provider. Use the correct provider names like "aws", "google", "azurerm", etc. in provider blocks.
+RESPONSE FORMAT:
+Return the OpenTofu configuration files first, then provide a clear explanation. Each file should be wrapped in file markers like this:
 
-For each file, start with "--- filename.tf ---" on a line by itself, followed by the file content, and end with "---" on a line by itself.
+---filename.tf---
+<content>
+---
 
-DO NOT include any dialog, explanations, or comments in your response. Return ONLY the code files with their contents.`
+After all files are generated, explain the configuration, including:
+- Purpose and structure of each file
+- Key resources and their relationships
+- Important configuration choices
+- Any variables that should be reviewed
+
+IMPORTANT RULES:
+1. Generate valid OpenTofu code within the file markers
+2. Use proper HCL syntax and formatting
+3. Include all necessary provider configurations
+4. Use clear, descriptive resource names
+5. Follow OpenTofu best practices for resource organization
+6. Ensure proper dependencies between resources
+7. Use variables for configurable values
+8. Include any required data sources
+9. Provide outputs for important resource attributes
+10. Use consistent naming conventions
+
+EXAMPLE OUTPUT:
+---main.tf---
+terraform {
+  required_providers {
+    aws = {
+      source  = "hashicorp/aws"
+      version = "~> 5.0"
+    }
+  }
+}
+
+provider "aws" {
+  region = var.region
+}
+
+resource "aws_instance" "web" {
+  ami           = data.aws_ami.ubuntu.id
+  instance_type = var.instance_type
+  tags          = var.tags
+}
+---
+
+---variables.tf---
+variable "region" {
+  type        = string
+  description = "AWS region"
+  default     = "us-west-2"
+}
+
+variable "instance_type" {
+  type        = string
+  description = "EC2 instance type"
+  default     = "t3.micro"
+}
+
+variable "tags" {
+  type        = map(string)
+  description = "Resource tags"
+  default     = {}
+}
+---
+
+The configuration above creates a basic AWS EC2 instance with the following features:
+- Uses the latest Ubuntu AMI through a data source
+- Configurable instance type (defaults to t3.micro)
+- Supports custom tagging through variables
+- Region can be specified (defaults to us-west-2)
+- Uses the latest AWS provider version 5.x`
 
 func (c *AICommand) Run(args []string) int {
 	var providerFlag, modelFlag, outputFlag, apiKeyFlag, apiURLFlag, registryDBFlag string
@@ -181,7 +242,7 @@ func (c *AICommand) Run(args []string) int {
 	cmdFlags.StringVar(&apiKeyFlag, "api-key", "", "API key for the AI provider")
 	cmdFlags.StringVar(&apiURLFlag, "api-url", "", "API URL for the AI provider")
 	cmdFlags.IntVar(&maxTokensFlag, "max-tokens", 4000, "Maximum number of tokens to generate")
-	cmdFlags.Float64Var(&temperatureFlag, "temperature", 0.7, "Temperature for generation (0.0-1.0)")
+	cmdFlags.Float64Var(&temperatureFlag, "temperature", 0.3, "Temperature for generation (0.0-1.0)")
 	cmdFlags.BoolVar(&useRegistryFlag, "use-registry", false, "Use OpenTofu Registry for provider and module information")
 	cmdFlags.StringVar(&registryDBFlag, "registry-db", "", "Database connection string for the OpenTofu Registry")
 
@@ -209,7 +270,7 @@ func (c *AICommand) Run(args []string) int {
 	// Set default model based on provider if not specified
 	if modelFlag == "" {
 		if provider == "anthropic" {
-			modelFlag = "claude-3-haiku-20240307"
+			modelFlag = "claude-3-7-sonnet-20250219"
 		} else {
 			modelFlag = "llama3"
 		}
@@ -221,6 +282,15 @@ func (c *AICommand) Run(args []string) int {
 		apiKeyFlag = os.Getenv("ANTHROPIC_API_KEY")
 		if apiKeyFlag == "" {
 			c.Meta.Ui.Error("Error: Anthropic API key is required. Provide it with -api-key flag or set ANTHROPIC_API_KEY environment variable.")
+			return 1
+		}
+	}
+
+	// Validate Anthropic API key format
+	if provider == "anthropic" && apiKeyFlag != "" {
+		apiKeyFlag = strings.TrimSpace(apiKeyFlag)
+		if !strings.HasPrefix(apiKeyFlag, "sk-") {
+			c.Meta.Ui.Error("Error: Invalid Anthropic API key format. API keys should start with 'sk-'.")
 			return 1
 		}
 	}
@@ -244,7 +314,7 @@ func (c *AICommand) Run(args []string) int {
 	var registrySystemPrompt string
 	if useRegistryFlag {
 		c.Meta.Ui.Output("Using OpenTofu Registry integration to enhance generation...")
-		
+
 		// Set up database connection if registry integration is requested
 		if registryDBFlag == "" {
 			// Try to get connection info from environment variables
@@ -253,7 +323,7 @@ func (c *AICommand) Run(args []string) int {
 			dbName := os.Getenv("OPENTOFU_REGISTRY_DB_NAME")
 			user := os.Getenv("OPENTOFU_REGISTRY_DB_USER")
 			password := os.Getenv("OPENTOFU_REGISTRY_DB_PASSWORD")
-			
+
 			// Use default values from memory if environment variables are not set
 			if host == "" {
 				host = "vultr-prod-860996d7-f3c4-4df8-b691-06ecc64db1c7-vultr-prod-c0b9.vultrdb.com"
@@ -267,14 +337,14 @@ func (c *AICommand) Run(args []string) int {
 			if user == "" {
 				user = "opentofu_user"
 			}
-			
+
 			// Construct connection string
 			if host != "" && port != "" && dbName != "" && user != "" {
 				registryDBFlag = fmt.Sprintf("host=%s port=%s dbname=%s user=%s password=%s sslmode=require",
 					host, port, dbName, user, password)
 			}
 		}
-		
+
 		// Build registry-specific system prompt addition
 		registrySystemPrompt = `
 Additionally, consider using the following information from the OpenTofu Registry:
@@ -317,45 +387,287 @@ Additionally, consider using the following information from the OpenTofu Registr
 		// Remove file header markers (--- filename.tf ---)
 		fileHeaderRegex := regexp.MustCompile(fmt.Sprintf(`(?m)^---\s*%s\s*---\s*$`, regexp.QuoteMeta(filename)))
 		content = fileHeaderRegex.ReplaceAllString(content, "")
-		
+
 		// Remove any other file header markers
 		content = regexp.MustCompile(`(?m)^---\s*[\w\-\.\/]+\s*---\s*$`).ReplaceAllString(content, "")
-		
+
 		// Remove any trailing --- markers
 		content = regexp.MustCompile(`(?m)^---\s*$`).ReplaceAllString(content, "")
-		
+
 		// Clean up whitespace
-		content = regexp.MustCompile(`(?m)^\n\n+`).ReplaceAllString(content, "\n")
-		content = strings.TrimSpace(content)
-		
+		content = regexp.MustCompile(`(?m)\n\s*\n\s*\n+`).ReplaceAllString(content, "\n\n")
+		content = regexp.MustCompile(`(?m)^\\s+$`).ReplaceAllString(content, "")
+
 		result.Files[filename] = content
 	}
 
 	// Write generated files
 	for filename, content := range result.Files {
 		filePath := filepath.Join(outputFlag, filename)
-		
+
 		// Create directory for file if it doesn't exist
 		dir := filepath.Dir(filePath)
 		if err := os.MkdirAll(dir, 0755); err != nil {
 			c.Meta.Ui.Error(fmt.Sprintf("Error creating directory %s: %s", dir, err))
 			return 1
 		}
-		
+
 		// Write file
 		if err := os.WriteFile(filePath, []byte(content), 0644); err != nil {
 			c.Meta.Ui.Error(fmt.Sprintf("Error writing file %s: %s", filePath, err))
 			return 1
 		}
-		
+
 		c.Meta.Ui.Output(fmt.Sprintf("Created %s", filePath))
 	}
 
 	c.Meta.Ui.Output(fmt.Sprintf("\nGeneration complete! Files written to %s", outputFlag))
 	c.Meta.Ui.Output("\nExplanation of generated configuration:")
 	c.Meta.Ui.Output(result.Explanation)
-	
+
 	return 0
+}
+
+// cleanTerraformContent removes unwanted artifacts from OpenTofu code
+func cleanTerraformContent(content string) string {
+	// Remove markdown code block markers
+	content = regexp.MustCompile("(?m)^```(?:terraform|hcl|tf)?\\s*$").ReplaceAllString(content, "")
+
+	// Remove all types of comments
+	content = regexp.MustCompile("(?m)^\\s*#.*$").ReplaceAllString(content, "")
+	content = regexp.MustCompile("(?m)^\\s*//.*$").ReplaceAllString(content, "")
+	content = regexp.MustCompile("(?s)/\\*.*?\\*/").ReplaceAllString(content, "")
+
+	// Remove common AI explanation patterns
+	content = regexp.MustCompile("(?i)(?m)^(Note:|Here's|This|Let's|Let me|I've|I have|We|Now|First|Then|Finally|Next|This creates|This sets up|As you can see).*$").ReplaceAllString(content, "")
+
+	// Remove file markers and headers
+	content = regexp.MustCompile("(?m)^---.*?---\\s*$").ReplaceAllString(content, "")
+	content = regexp.MustCompile("(?m)^\\s*\\[.*?\\]\\s*$").ReplaceAllString(content, "")
+	content = regexp.MustCompile("(?m)^\\s*\\*.*?\\*\\s*$").ReplaceAllString(content, "")
+
+	// Remove any remaining markdown or documentation artifacts
+	content = regexp.MustCompile("(?m)^\\s*>.*$").ReplaceAllString(content, "")
+	content = regexp.MustCompile("(?m)^\\s*-\\s+.*$").ReplaceAllString(content, "")
+	content = regexp.MustCompile("(?m)^\\s*\\d+\\.\\s+.*$").ReplaceAllString(content, "")
+
+	// Remove any "Copy code" or similar artifacts
+	content = regexp.MustCompile("(?i)(?m)^\\s*copy\\s+code\\s*$").ReplaceAllString(content, "")
+
+	// Clean up whitespace
+	content = regexp.MustCompile(`(?m)\n\s*\n\s*\n+`).ReplaceAllString(content, "\n\n")
+	content = regexp.MustCompile(`(?m)^\\s+$`).ReplaceAllString(content, "")
+
+	// Validate that content looks like valid HCL
+	lines := strings.Split(content, "\n")
+	var validLines []string
+	bracketCount := 0
+	inBlockComment := false
+
+	for _, line := range lines {
+		trimmed := strings.TrimSpace(line)
+
+		// Skip empty lines at the start
+		if len(validLines) == 0 && trimmed == "" {
+			continue
+		}
+
+		// Track block comments
+		if strings.Contains(trimmed, "/*") {
+			inBlockComment = true
+		}
+		if strings.Contains(trimmed, "*/") {
+			inBlockComment = false
+			continue
+		}
+		if inBlockComment {
+			continue
+		}
+
+		// Count brackets to help validate HCL structure
+		bracketCount += strings.Count(trimmed, "{") - strings.Count(trimmed, "}")
+
+		// Only keep lines that look like valid HCL
+		if strings.Contains(trimmed, "=") ||
+			strings.Contains(trimmed, "{") ||
+			strings.Contains(trimmed, "}") ||
+			strings.HasPrefix(trimmed, "provider ") ||
+			strings.HasPrefix(trimmed, "resource ") ||
+			strings.HasPrefix(trimmed, "data ") ||
+			strings.HasPrefix(trimmed, "variable ") ||
+			strings.HasPrefix(trimmed, "output ") ||
+			strings.HasPrefix(trimmed, "module ") ||
+			strings.HasPrefix(trimmed, "terraform ") {
+			validLines = append(validLines, line)
+		}
+	}
+
+	content = strings.Join(validLines, "\n")
+	content = strings.TrimSpace(content)
+
+	// Try to format the content using the OpenTofu formatter
+	if content != "" {
+		fmtCmd := &command.FmtCommand{
+			Meta: command.Meta{
+				Ui: &cli.BasicUi{
+					Reader:      os.Stdin,
+					Writer:      io.Discard, // Discard output since we just want to validate
+					ErrorWriter: io.Discard,
+				},
+			},
+		}
+
+		// Create a temporary file for formatting
+		tmpFile, err := os.CreateTemp("", "tofu-*.tf")
+		if err == nil {
+			defer os.Remove(tmpFile.Name())
+			if _, err := tmpFile.WriteString(content); err == nil {
+				tmpFile.Close()
+
+				// Try to format the file
+				args := []string{tmpFile.Name()}
+				if fmtCmd.Run(args) == 0 {
+					// Read the formatted content
+					if formatted, err := os.ReadFile(tmpFile.Name()); err == nil {
+						content = string(formatted)
+					}
+				}
+			}
+		}
+	}
+
+	return content
+}
+
+// extractFilesFromText is a fallback method to extract files from the generated text
+// if the standard parsing fails. It looks for patterns like "filename.tf" followed by
+// code blocks or content.
+func extractFilesFromText(text string) (*GenerationResult, error) {
+	result := &GenerationResult{
+		Files: make(map[string]string),
+	}
+
+	// Debug output
+	fmt.Printf("Extracting files from text of length: %d\n", len(text))
+	if len(text) > 200 {
+		fmt.Printf("First 200 chars: %s\n", text[:200])
+	}
+
+	// Try to extract files using different patterns
+
+	// Pattern 1: --- filename.tf --- format
+	fileBlockRegex := regexp.MustCompile(`(?s)---\s*([\w\-\.\/]+\.tf)\s*---\s*\n(.*?)\n\s*---`)
+	matches := fileBlockRegex.FindAllStringSubmatch(text, -1)
+
+	if len(matches) > 0 {
+		fmt.Printf("Found %d files using pattern 1\n", len(matches))
+		// Extract files
+		for _, match := range matches {
+			if len(match) >= 3 {
+				filename := strings.TrimSpace(match[1])
+				content := strings.TrimSpace(match[2])
+				fmt.Printf("Extracted file: %s (length: %d)\n", filename, len(content))
+
+				if content != "" {
+					result.Files[filename] = content
+				}
+			}
+		}
+
+		// Extract explanation by finding the last file marker and taking everything after it
+		lastFileMarkerPos := 0
+		for _, match := range matches {
+			pos := strings.LastIndex(text, match[0]) + len(match[0])
+			if pos > lastFileMarkerPos {
+				lastFileMarkerPos = pos
+			}
+		}
+
+		if lastFileMarkerPos > 0 && lastFileMarkerPos < len(text) {
+			explanation := strings.TrimSpace(text[lastFileMarkerPos:])
+			if explanation != "" {
+				result.Explanation = explanation
+			}
+		}
+	}
+
+	// Pattern 2: Look for typical OpenTofu file patterns if no files were found
+	if len(result.Files) == 0 {
+		// Try to identify Terraform blocks in the content
+		providerRegex := regexp.MustCompile(`(?s)provider\s+\"(\w+)\"\s*{`)
+		resourceRegex := regexp.MustCompile(`(?s)resource\s+\"(\w+)\"\s+\"(\w+)\"\s*{`)
+		// Check for terraform block patterns
+
+		// If we find terraform blocks, create at least a main.tf
+		if providerRegex.MatchString(text) || resourceRegex.MatchString(text) {
+			fmt.Println("Found Terraform blocks in content, creating main.tf")
+			result.Files["main.tf"] = text
+		}
+	}
+
+	// Pattern 3: Try to extract files from markdown code blocks if still no files
+	if len(result.Files) == 0 {
+		markdownBlockRegex := regexp.MustCompile("```(?:terraform|hcl|tf)?\n(.*?)```")
+		markdownMatches := markdownBlockRegex.FindAllStringSubmatch(text, -1)
+
+		if len(markdownMatches) > 0 {
+			fmt.Printf("Found %d code blocks using pattern 3\n", len(markdownMatches))
+			// Extract first code block as main.tf
+			content := strings.TrimSpace(markdownMatches[0][1])
+			if content != "" {
+				result.Files["main.tf"] = content
+				fmt.Printf("Created main.tf from code block (length: %d)\n", len(content))
+			}
+
+			// Additional code blocks as separate files
+			if len(markdownMatches) > 1 {
+				// Try to detect if there are file markers in the content before the code blocks
+				fileNameRegex := regexp.MustCompile(`(?i)(?:for|in|as|filename:|file:)\s*([\w\-\.\/]+\.tf)`)
+
+				for i, match := range markdownMatches[1:] {
+					if len(match) >= 2 {
+						fileContent := strings.TrimSpace(match[1])
+
+						// Try to find a filename in the text before this code block
+						fileName := fmt.Sprintf("file%d.tf", i+1) // Default filename
+
+						// Find the position of this code block in the original text
+						blockPos := strings.Index(text, match[0])
+						if blockPos > 0 {
+							// Look for a filename in the 200 characters before this block
+							searchStart := math.Max(0, float64(blockPos-200))
+							searchEnd := float64(blockPos)
+							searchText := text[int(searchStart):int(searchEnd)]
+
+							fileNameMatches := fileNameRegex.FindStringSubmatch(searchText)
+							if len(fileNameMatches) >= 2 {
+								fileName = fileNameMatches[1]
+							}
+						}
+
+						if fileContent != "" {
+							result.Files[fileName] = fileContent
+							fmt.Printf("Created %s from code block (length: %d)\n", fileName, len(fileContent))
+						}
+					}
+				}
+			}
+		}
+	}
+
+	// If we still don't have any files but we have content, create a single main.tf
+	if len(result.Files) == 0 && len(text) > 0 {
+		fmt.Println("No files extracted using patterns, creating a fallback main.tf")
+		result.Files["main.tf"] = text
+	}
+
+	// If no explanation was found, set a default one
+	if result.Explanation == "" {
+		result.Explanation = "Generated OpenTofu configuration based on the provided requirements."
+	}
+
+	fmt.Printf("Extraction complete. Found %d files.\n", len(result.Files))
+	return result, nil
 }
 
 // generateWithAnthropic generates OpenTofu configuration using Anthropic Claude
@@ -376,7 +688,7 @@ func (c *AICommand) generateWithAnthropic(ctx context.Context, model, apiKey, ap
 
 	// Set default model if not specified
 	if req.Model == "" {
-		req.Model = "claude-3-haiku-20240307"
+		req.Model = "claude-3-7-sonnet-20250219"
 	}
 
 	// Set default API URL if not specified
@@ -399,6 +711,9 @@ func (c *AICommand) generateWithAnthropic(ctx context.Context, model, apiKey, ap
 	httpReq.Header.Set("x-api-key", apiKey)
 	httpReq.Header.Set("anthropic-version", "2023-06-01")
 
+	// Add debug information
+	c.Meta.Ui.Output(fmt.Sprintf("Sending request to Anthropic API at %s using model %s", apiURL, req.Model))
+
 	// Send request
 	client := &http.Client{}
 	resp, err := client.Do(httpReq)
@@ -411,6 +726,28 @@ func (c *AICommand) generateWithAnthropic(ctx context.Context, model, apiKey, ap
 	body, err := io.ReadAll(resp.Body)
 	if err != nil {
 		return nil, fmt.Errorf("error reading response: %w", err)
+	}
+
+	// Check for error response
+	if resp.StatusCode != http.StatusOK {
+		bodyStr := string(body)
+		c.Meta.Ui.Error(fmt.Sprintf("Anthropic API error (status %d): %s", resp.StatusCode, bodyStr))
+
+		// Parse error response if possible
+		var errorResp struct {
+			Type  string `json:"type"`
+			Error struct {
+				Type    string `json:"type"`
+				Message string `json:"message"`
+			} `json:"error"`
+		}
+
+		if err := json.Unmarshal(body, &errorResp); err == nil && errorResp.Error.Message != "" {
+			return nil, fmt.Errorf("Anthropic API error: %s (type: %s)",
+				errorResp.Error.Message, errorResp.Error.Type)
+		}
+
+		return nil, fmt.Errorf("API error (status %d): %s", resp.StatusCode, bodyStr)
 	}
 
 	// Parse response
@@ -429,11 +766,30 @@ func (c *AICommand) generateWithAnthropic(ctx context.Context, model, apiKey, ap
 	}
 
 	if text == "" {
-		return nil, fmt.Errorf("no text content found in Anthropic response")
+		// Provide more detailed error information
+		respBytes, _ := json.MarshalIndent(anthropicResp, "", "  ")
+		return nil, fmt.Errorf("no text content found in Anthropic response. Response details: %s", string(respBytes))
 	}
 
+	// Log token usage for debugging and monitoring
+	c.Meta.Ui.Output(fmt.Sprintf("AI generation complete. Used %d input tokens and %d output tokens.",
+		anthropicResp.Usage.InputTokens, anthropicResp.Usage.OutputTokens))
+
+	// Log the first part of the response for debugging
+	fmt.Printf("Response preview: %s\n", text[:int(math.Min(float64(len(text)), 200))])
+
 	// Parse the generated text into files and explanation
-	return extractFilesFromText(text)
+	result, err := extractFilesFromText(text)
+
+	// Additional debug: report how many files were extracted
+	if err == nil && result != nil {
+		fmt.Printf("Extracted %d files from the response\n", len(result.Files))
+		for filename := range result.Files {
+			fmt.Printf("- %s\n", filename)
+		}
+	}
+
+	return result, err
 }
 
 // generateWithOllama generates OpenTofu configuration using Ollama
@@ -495,224 +851,6 @@ func (c *AICommand) generateWithOllama(ctx context.Context, model, apiKey, apiUR
 	result, err := extractFilesFromText(ollamaResp.Response)
 	if err != nil {
 		return nil, fmt.Errorf("error extracting files: %w", err)
-	}
-
-	// If no explanation was provided, add a default one
-	if result.Explanation == "" {
-		result.Explanation = "No explanation provided by the AI model."
-	}
-
-	return result, nil
-}
-
-// extractFilesFromText is a fallback method to extract files from the generated text
-// if the standard parsing fails. It looks for patterns like "filename.tf" followed by
-// code blocks or content.
-func extractFilesFromText(text string) (*GenerationResult, error) {
-	result := &GenerationResult{
-		Files: make(map[string]string),
-	}
-
-	// First, try to extract files using the standard format (--- filename.tf ---)
-	fileBlockRegex := regexp.MustCompile(`(?m)^---\s+([\w\-\.\/]+)\s+---\n(.*?)(?:\n---(?:\s+|$)|\z)`)
-	matches := fileBlockRegex.FindAllStringSubmatch(text, -1)
-	
-	if len(matches) > 0 {
-		// Extract files
-		for _, match := range matches {
-			if len(match) >= 3 {
-				filename := strings.TrimSpace(match[1])
-				content := strings.TrimSpace(match[2])
-				
-				// Remove any markdown code block markers
-				content = regexp.MustCompile("(?m)^```(?:terraform|hcl)?$").ReplaceAllString(content, "")
-				content = regexp.MustCompile("(?m)^```$").ReplaceAllString(content, "")
-				
-				// Remove any comments that might have been added despite instructions
-				content = regexp.MustCompile("(?m)^\\s*#.*$").ReplaceAllString(content, "")
-				content = regexp.MustCompile("(?m)^\\s*//.*$").ReplaceAllString(content, "")
-				content = regexp.MustCompile("(?m)/\\*.*?\\*/").ReplaceAllString(content, "")
-				
-				// Remove any dialog or explanation text that might be mixed with code
-				content = regexp.MustCompile("(?i)(?m)^(Note:|Here's|This file|As you can see|Let me|I've|I have|This creates|This sets up).*$").ReplaceAllString(content, "")
-				
-				// Remove any --- markers that might be included in the content
-				content = regexp.MustCompile("(?m)^---\\s*$").ReplaceAllString(content, "")
-				
-				// Clean up any extra whitespace
-				content = regexp.MustCompile("(?m)^\n\n+").ReplaceAllString(content, "\n")
-				content = strings.TrimSpace(content)
-				
-				result.Files[filename] = content
-			}
-		}
-
-		// Extract explanation (text after the last file block)
-		lastMatchIndices := fileBlockRegex.FindAllStringSubmatchIndex(text, -1)
-		lastMatchEnd := lastMatchIndices[len(matches)-1][1]
-		if lastMatchEnd < len(text) {
-			result.Explanation = strings.TrimSpace(text[lastMatchEnd:])
-		}
-	} else {
-		// Try to extract files from markdown code blocks
-		markdownBlockRegex := regexp.MustCompile("```(?:terraform|hcl)?\n(.*?)```")
-		markdownMatches := markdownBlockRegex.FindAllStringSubmatch(text, -1)
-		
-		if len(markdownMatches) > 0 {
-			// For Ollama output, we typically get a single code block with the entire configuration
-			// Extract it as main.tf
-			content := strings.TrimSpace(markdownMatches[0][1])
-			
-			// Clean up the content
-			content = regexp.MustCompile("(?m)^\\s*#.*$").ReplaceAllString(content, "")
-			content = regexp.MustCompile("(?m)^\\s*//.*$").ReplaceAllString(content, "")
-			content = regexp.MustCompile("(?m)/\\*.*?\\*/").ReplaceAllString(content, "")
-			content = regexp.MustCompile("(?i)(?m)^(Note:|Here's|This file|As you can see|Let me|I've|I have|This creates|This sets up).*$").ReplaceAllString(content, "")
-			
-			// Remove any --- markers that might be included in the content
-			content = regexp.MustCompile("(?m)^---\\s*$").ReplaceAllString(content, "")
-			
-			// Clean up any extra whitespace
-			content = regexp.MustCompile("(?m)^\n\n+").ReplaceAllString(content, "\n")
-			content = strings.TrimSpace(content)
-			
-			result.Files["main.tf"] = content
-			
-			// Check if there are any other code blocks that might be separate files
-			if len(markdownMatches) > 1 {
-				for i, match := range markdownMatches[1:] {
-					if len(match) >= 2 {
-						fileContent := strings.TrimSpace(match[1])
-						
-						// Clean up the content
-						fileContent = regexp.MustCompile("(?m)^\\s*#.*$").ReplaceAllString(fileContent, "")
-						fileContent = regexp.MustCompile("(?m)^\\s*//.*$").ReplaceAllString(fileContent, "")
-						fileContent = regexp.MustCompile("(?m)/\\*.*?\\*/").ReplaceAllString(fileContent, "")
-						fileContent = regexp.MustCompile("(?i)(?m)^(Note:|Here's|This file|As you can see|Let me|I've|I have|This creates|This sets up).*$").ReplaceAllString(fileContent, "")
-						
-						// Remove any --- markers that might be included in the content
-						fileContent = regexp.MustCompile("(?m)^---\\s*$").ReplaceAllString(fileContent, "")
-						
-						// Clean up any extra whitespace
-						fileContent = regexp.MustCompile("(?m)^\n\n+").ReplaceAllString(fileContent, "\n")
-						fileContent = strings.TrimSpace(fileContent)
-						
-						result.Files[fmt.Sprintf("file%d.tf", i+1)] = fileContent
-					}
-				}
-			}
-			
-			// Try to extract explanation from the text outside code blocks
-			explanationText := markdownBlockRegex.ReplaceAllString(text, "")
-			result.Explanation = strings.TrimSpace(explanationText)
-		} else {
-			// Look for file headers (e.g., "# main.tf" or "## variables.tf")
-			lines := strings.Split(text, "\n")
-			var currentFile string
-			var currentContent strings.Builder
-			var inCodeBlock bool
-			var explanationBuilder strings.Builder
-			var collectingExplanation bool
-
-			for _, line := range lines {
-				// Check for file headers (e.g., "# main.tf" or "## variables.tf")
-				if strings.HasPrefix(line, "#") && (strings.Contains(line, ".tf") || 
-				strings.Contains(line, ".md") || strings.Contains(line, ".txt")) {
-					// If we were collecting a file, save it
-					if currentFile != "" && currentContent.Len() > 0 {
-						fileContent := currentContent.String()
-						
-						// Clean up the content
-						fileContent = regexp.MustCompile("(?m)^\\s*#.*$").ReplaceAllString(fileContent, "")
-						fileContent = regexp.MustCompile("(?m)^\\s*//.*$").ReplaceAllString(fileContent, "")
-						fileContent = regexp.MustCompile("(?m)/\\*.*?\\*/").ReplaceAllString(fileContent, "")
-						fileContent = regexp.MustCompile("(?i)(?m)^(Note:|Here's|This file|As you can see|Let me|I've|I have|This creates|This sets up).*$").ReplaceAllString(fileContent, "")
-						
-						// Remove any --- markers that might be included in the content
-						fileContent = regexp.MustCompile("(?m)^---\\s*$").ReplaceAllString(fileContent, "")
-						
-						// Clean up any extra whitespace
-						fileContent = regexp.MustCompile("(?m)^\n\n+").ReplaceAllString(fileContent, "\n")
-						fileContent = strings.TrimSpace(fileContent)
-						
-						result.Files[currentFile] = fileContent
-						currentContent.Reset()
-					}
-					
-					// Extract the filename from the header
-					filenameParts := strings.Fields(line)
-					if len(filenameParts) > 1 {
-						currentFile = filenameParts[len(filenameParts)-1]
-						inCodeBlock = false
-					}
-					continue
-				}
-				
-				// Check for code block markers
-				if strings.HasPrefix(line, "```") {
-					inCodeBlock = !inCodeBlock
-					continue
-				}
-				
-				// If we have a current file, add the line to its content
-				if currentFile != "" {
-					currentContent.WriteString(line)
-					currentContent.WriteString("\n")
-				} else if !inCodeBlock && !collectingExplanation && line != "" {
-					// If we're not in a code block and not collecting a file,
-					// and the line is not empty, start collecting explanation
-					collectingExplanation = true
-					explanationBuilder.WriteString(line)
-					explanationBuilder.WriteString("\n")
-				} else if collectingExplanation {
-					explanationBuilder.WriteString(line)
-					explanationBuilder.WriteString("\n")
-				}
-			}
-			
-			// Save the last file if there is one
-			if currentFile != "" && currentContent.Len() > 0 {
-				fileContent := currentContent.String()
-				
-				// Clean up the content
-				fileContent = regexp.MustCompile("(?m)^\\s*#.*$").ReplaceAllString(fileContent, "")
-				fileContent = regexp.MustCompile("(?m)^\\s*//.*$").ReplaceAllString(fileContent, "")
-				fileContent = regexp.MustCompile("(?m)/\\*.*?\\*/").ReplaceAllString(fileContent, "")
-				fileContent = regexp.MustCompile("(?i)(?m)^(Note:|Here's|This file|As you can see|Let me|I've|I have|This creates|This sets up).*$").ReplaceAllString(fileContent, "")
-				
-				// Remove any --- markers that might be included in the content
-				fileContent = regexp.MustCompile("(?m)^---\\s*$").ReplaceAllString(fileContent, "")
-				
-				// Clean up any extra whitespace
-				fileContent = regexp.MustCompile("(?m)^\n\n+").ReplaceAllString(fileContent, "\n")
-				fileContent = strings.TrimSpace(fileContent)
-				
-				result.Files[currentFile] = fileContent
-			}
-			
-			// Set the explanation
-			if explanationBuilder.Len() > 0 {
-				result.Explanation = strings.TrimSpace(explanationBuilder.String())
-			}
-			
-			// If we didn't find any files, use the entire text as main.tf
-			if len(result.Files) == 0 {
-				// Clean up the content
-				cleanText := regexp.MustCompile("(?m)^\\s*#.*$").ReplaceAllString(text, "")
-				cleanText = regexp.MustCompile("(?m)^\\s*//.*$").ReplaceAllString(cleanText, "")
-				cleanText = regexp.MustCompile("(?m)/\\*.*?\\*/").ReplaceAllString(cleanText, "")
-				cleanText = regexp.MustCompile("(?i)(?m)^(Note:|Here's|This file|As you can see|Let me|I've|I have|This creates|This sets up).*$").ReplaceAllString(cleanText, "")
-				
-				// Remove any --- markers that might be included in the content
-				cleanText = regexp.MustCompile("(?m)^---\\s*$").ReplaceAllString(cleanText, "")
-				
-				// Clean up any extra whitespace
-				cleanText = regexp.MustCompile("(?m)^\n\n+").ReplaceAllString(cleanText, "\n")
-				cleanText = strings.TrimSpace(cleanText)
-				
-				result.Files["main.tf"] = cleanText
-			}
-		}
 	}
 
 	// If no explanation was provided, add a default one
