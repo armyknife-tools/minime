@@ -47,6 +47,9 @@ tmp
 # Archive folder
 archive/
 
+# AI Agent Folder
+ai-agent/
+
 # Test files and folders
 test-*
 *test*
