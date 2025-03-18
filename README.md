@@ -54,6 +54,117 @@ If you believe you have found any possible copyright or intellectual property is
 
 In an effort to comply with applicable sanctions, we block access from specific countries of origin.
 
+## Template System
+
+OpenTofu includes a template system that allows you to generate infrastructure-as-code templates for various cloud providers. This feature helps you quickly scaffold common cloud resources with best practices built-in.
+
+### Using Templates
+
+#### Listing Available Templates
+
+To see all available template providers:
+```bash
+tofu template
+```
+
+To list templates for a specific provider:
+```bash
+tofu template aws
+```
+
+#### Generating a Template
+
+To generate a template for a specific resource:
+```bash
+tofu template aws/s3
+```
+
+This will create a file named after the resource (e.g., `s3.tf`) in your current directory.
+
+### Creating Custom Templates
+
+You can create custom templates by adding them to the template database. Templates are defined in the `internal/templates` package.
+
+1. **Create a Template Definition**:
+   
+   Templates are defined in provider-specific files (e.g., `aws_templates.go`, `azure_templates.go`, `gcp_templates.go`). To add a new template:
+
+   ```go
+   // Add to the appropriate generateXTemplates function
+   templates = append(templates, Template{
+       Provider:    "aws",
+       Resource:    "my_resource",
+       DisplayName: "My Resource",
+       Description: "Description of my resource",
+       Category:    "Category",
+       Tags:        "tag1,tag2",
+       Content:     `# My Resource Template
+   
+   resource "aws_my_resource" "example" {
+     name = "example"
+     # ... other properties
+   }`,
+   })
+   ```
+
+2. **Build OpenTofu**:
+   ```bash
+   go build -o tofu ./cmd/tofu
+   ```
+
+3. **Load Templates into the Database**:
+   ```bash
+   tofu template -load
+   ```
+
+   This command supports both SQLite (default) and PostgreSQL databases:
+   ```bash
+   # For SQLite (default)
+   tofu template -load
+
+   # For PostgreSQL (using environment variables)
+   export TOFU_REGISTRY_DB_TYPE=postgres
+   export TOFU_REGISTRY_DB_HOST=your-postgres-host
+   export TOFU_REGISTRY_DB_PORT=5432
+   export TOFU_REGISTRY_DB_USER=your-user
+   export TOFU_REGISTRY_DB_PASSWORD=your-password
+   export TOFU_REGISTRY_DB_NAME=your-dbname
+   export TOFU_REGISTRY_DB_SSLMODE=require
+   tofu template -load
+   ```
+
+4. **Verify Your Template**:
+   ```bash
+   # List templates for your provider
+   tofu template your-provider
+   
+   # Generate your template
+   tofu template your-provider/your-resource
+   ```
+
+### Database Configuration
+
+The template system supports both SQLite and PostgreSQL databases:
+
+- **SQLite**: Used by default, with database stored at `~/.opentofu/tofu.db`
+- **PostgreSQL**: Configured using environment variables:
+  - `TOFU_REGISTRY_DB_TYPE=postgres`
+  - `TOFU_REGISTRY_DB_HOST=host`
+  - `TOFU_REGISTRY_DB_PORT=port`
+  - `TOFU_REGISTRY_DB_USER=user`
+  - `TOFU_REGISTRY_DB_PASSWORD=password`
+  - `TOFU_REGISTRY_DB_NAME=dbname`
+  - `TOFU_REGISTRY_DB_SSLMODE=sslmode`
+
+You can also use the database configuration commands:
+```bash
+# Set up the database
+tofu db setup
+
+# Configure database connection
+tofu db configure
+```
+
 ## License
 
 [Mozilla Public License v2.0](https://github.com/opentofu/opentofu/blob/main/LICENSE)

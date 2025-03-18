@@ -465,5 +465,140 @@ resource "aws_security_group" "db" {
 `,
 	})
 
+	// AWS Lambda Function
+	templates = append(templates, Template{
+		Provider:    "aws",
+		Resource:    "lambda",
+		DisplayName: "Lambda Function",
+		Description: "AWS Lambda function with all common configuration options",
+		Category:    "Compute",
+		Tags:        "compute,serverless,lambda,function",
+		Content: `# AWS Lambda Template
+# This template includes all common properties for an AWS Lambda function
+
+resource "aws_lambda_function" "example" {
+  function_name = "example-lambda-function"
+  description   = "Example Lambda function"
+  
+  # Code source - can be S3 bucket or local file
+  filename      = "lambda_function.zip"
+  # s3_bucket     = "my-lambda-bucket"
+  # s3_key        = "lambda_function.zip"
+  # s3_object_version = "1"
+  
+  # Runtime and handler
+  runtime       = "nodejs18.x"
+  handler       = "index.handler"
+  
+  # IAM role for execution
+  role          = aws_iam_role.lambda_exec.arn
+  
+  # Environment variables
+  environment {
+    variables = {
+      ENV_VAR_1 = "value1"
+      ENV_VAR_2 = "value2"
+    }
+  }
+  
+  # Configuration
+  memory_size   = 128
+  timeout       = 3
+  
+  # VPC configuration (optional)
+  # vpc_config {
+  #   subnet_ids         = [aws_subnet.example.id]
+  #   security_group_ids = [aws_security_group.example.id]
+  # }
+  
+  # Dead letter queue (optional)
+  # dead_letter_config {
+  #   target_arn = aws_sqs_queue.dead_letter.arn
+  # }
+  
+  # Tracing configuration (optional)
+  # tracing_config {
+  #   mode = "Active"
+  # }
+  
+  # Reserved concurrency (optional)
+  # reserved_concurrent_executions = 10
+  
+  # Tags
+  tags = {
+    Environment = "dev"
+    Name        = "example-lambda"
+  }
+}
+
+# IAM role for Lambda execution
+resource "aws_iam_role" "lambda_exec" {
+  name = "lambda-exec-role"
+
+  assume_role_policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [
+      {
+        Action = "sts:AssumeRole"
+        Effect = "Allow"
+        Principal = {
+          Service = "lambda.amazonaws.com"
+        }
+      }
+    ]
+  })
+}
+
+# Attach basic Lambda execution policy
+resource "aws_iam_role_policy_attachment" "lambda_basic" {
+  role       = aws_iam_role.lambda_exec.name
+  policy_arn = "arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole"
+}
+
+# CloudWatch Log Group for Lambda logs
+resource "aws_cloudwatch_log_group" "lambda_logs" {
+  name              = "/aws/lambda/example-lambda-function"
+  retention_in_days = 14
+}
+
+# Lambda permission for API Gateway (if needed)
+# resource "aws_lambda_permission" "api_gateway" {
+#   statement_id  = "AllowAPIGatewayInvoke"
+#   action        = "lambda:InvokeFunction"
+#   function_name = aws_lambda_function.example.function_name
+#   principal     = "apigateway.amazonaws.com"
+#   source_arn    = "${aws_api_gateway_rest_api.example.execution_arn}/*/*"
+# }
+
+# Lambda function URL (optional, for direct HTTP access)
+# resource "aws_lambda_function_url" "function_url" {
+#   function_name      = aws_lambda_function.example.function_name
+#   authorization_type = "NONE"  # or "AWS_IAM"
+# }
+
+# Lambda event source mapping (for event-based triggers like SQS, DynamoDB, etc.)
+# resource "aws_lambda_event_source_mapping" "example" {
+#   event_source_arn  = aws_sqs_queue.example.arn
+#   function_name     = aws_lambda_function.example.arn
+#   batch_size        = 10
+#   enabled           = true
+#   starting_position = "LATEST"  # For Kinesis/DynamoDB streams
+# }
+
+# Outputs
+output "lambda_function_arn" {
+  value = aws_lambda_function.example.arn
+}
+
+output "lambda_function_name" {
+  value = aws_lambda_function.example.function_name
+}
+
+# output "lambda_function_url" {
+#   value = aws_lambda_function_url.function_url.function_url
+# }
+`,
+	})
+
 	return templates
 }

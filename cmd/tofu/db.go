@@ -784,11 +784,28 @@ func createDatabaseTables(db *sql.DB) error {
 
 // testDatabaseSchema tests if the database schema is valid
 func testDatabaseSchema(db *sql.DB, verbose bool) error {
+	// Determine database type
+	var dbName string
+	dbTypeErr := db.QueryRow("SELECT current_database()").Scan(&dbName)
+	isPostgres := dbTypeErr == nil
+
 	// Check if templates table exists
 	var tableName string
-	query := `
-	SELECT name FROM sqlite_master WHERE type='table' AND name='templates';
-	`
+	var query string
+	
+	if isPostgres {
+		// PostgreSQL query
+		query = `
+		SELECT table_name FROM information_schema.tables 
+		WHERE table_schema = 'public' AND table_name = 'templates';
+		`
+	} else {
+		// SQLite query
+		query = `
+		SELECT name FROM sqlite_master WHERE type='table' AND name='templates';
+		`
+	}
+	
 	err := db.QueryRow(query).Scan(&tableName)
 	if err != nil {
 		return fmt.Errorf("templates table not found: %v", err)
@@ -796,25 +813,59 @@ func testDatabaseSchema(db *sql.DB, verbose bool) error {
 
 	if verbose {
 		// Get table schema
-		rows, err := db.Query("PRAGMA table_info(templates);")
+		var rows *sql.Rows
+		
+		if isPostgres {
+			// PostgreSQL schema query
+			rows, err = db.Query(`
+				SELECT column_name, data_type, 
+				CASE WHEN is_nullable = 'NO' THEN 1 ELSE 0 END as not_null,
+				CASE WHEN column_name IN (SELECT column_name FROM information_schema.key_column_usage 
+					WHERE table_name = 'templates' AND constraint_name = 'templates_pkey') 
+					THEN 1 ELSE 0 END as primary_key
+				FROM information_schema.columns 
+				WHERE table_name = 'templates' AND table_schema = 'public'
+				ORDER BY ordinal_position;
+			`)
+		} else {
+			// SQLite schema query
+			rows, err = db.Query("PRAGMA table_info(templates);")
+		}
+		
 		if err != nil {
 			return fmt.Errorf("error getting table schema: %v", err)
 		}
 		defer rows.Close()
 
 		fmt.Println("Templates table schema:")
-		for rows.Next() {
-			var cid int
-			var name string
-			var dataType string
-			var notNull int
-			var dfltValue interface{}
-			var pk int
-			err = rows.Scan(&cid, &name, &dataType, &notNull, &dfltValue, &pk)
-			if err != nil {
-				return fmt.Errorf("error scanning row: %v", err)
+		if isPostgres {
+			// PostgreSQL column format
+			for rows.Next() {
+				var name string
+				var dataType string
+				var notNull int
+				var pk int
+				err = rows.Scan(&name, &dataType, &notNull, &pk)
+				if err != nil {
+					return fmt.Errorf("error scanning row: %v", err)
+				}
+				fmt.Printf("  Column: %s, Type: %s, NotNull: %d, PK: %d\n", name, dataType, notNull, pk)
 			}
-			fmt.Printf("  Column: %s, Type: %s, NotNull: %d, PK: %d\n", name, dataType, notNull, pk)
+		} else {
+			// SQLite column format
+			for rows.Next() {
+				var cid int
+				var name string
+				var dataType string
+				var notNull int
+				var dfltValue interface{}
+				var pk int
+				err = rows.Scan(&cid, &name, &dataType, &notNull, &dfltValue, &pk)
+				if err != nil {
+					return fmt.Errorf("error scanning row: %v", err)
+				}
+				fmt.Printf("  Column: %s, Type: %s, NotNull: %d, PK: %d\n", name, dataType, notNull, pk)
+			}
 		}
 	}
 
@@ -823,6 +874,11 @@ func testDatabaseSchema(db *sql.DB, verbose bool) error {
 
 // testCRUDOperations tests basic CRUD operations on the database
 func testCRUDOperations(db *sql.DB, verbose bool) error {
+	// Determine database type
+	var dbName string
+	dbTypeErr := db.QueryRow("SELECT current_database()").Scan(&dbName)
+	isPostgres := dbTypeErr == nil
+
 	// Test data
 	testTemplate := Template{
 		Provider:    "test",
@@ -835,27 +891,52 @@ func testCRUDOperations(db *sql.DB, verbose bool) error {
 	}
 
 	// Create
-	query := `
-	INSERT INTO templates (provider, resource, display_name, content, description, category, tags)
-	VALUES (?, ?, ?, ?, ?, ?, ?)
-	ON CONFLICT (provider, resource) DO UPDATE
-	SET display_name = ?, content = ?, description = ?, category = ?, tags = ?;
-	`
-	_, err := db.Exec(
-		query,
-		testTemplate.Provider,
-		testTemplate.Resource,
-		testTemplate.DisplayName,
-		testTemplate.Content,
-		testTemplate.Description,
-		testTemplate.Category,
-		testTemplate.Tags,
-		testTemplate.DisplayName,
-		testTemplate.Content,
-		testTemplate.Description,
-		testTemplate.Category,
-		testTemplate.Tags,
-	)
+	var query string
+	var err error
+	
+	if isPostgres {
+		// PostgreSQL query with $N placeholders
+		query = `
+		INSERT INTO templates (provider, resource, display_name, content, description, category, tags)
+		VALUES ($1, $2, $3, $4, $5, $6, $7)
+		ON CONFLICT (provider, resource) DO UPDATE
+		SET display_name = $3, content = $4, description = $5, category = $6, tags = $7;
+		`
+		_, err = db.Exec(
+			query,
+			testTemplate.Provider,
+			testTemplate.Resource,
+			testTemplate.DisplayName,
+			testTemplate.Content,
+			testTemplate.Description,
+			testTemplate.Category,
+			testTemplate.Tags,
+		)
+	} else {
+		// SQLite query with ? placeholders
+		query = `
+		INSERT INTO templates (provider, resource, display_name, content, description, category, tags)
+		VALUES (?, ?, ?, ?, ?, ?, ?)
+		ON CONFLICT (provider, resource) DO UPDATE
+		SET display_name = ?, content = ?, description = ?, category = ?, tags = ?;
+		`
+		_, err = db.Exec(
+			query,
+			testTemplate.Provider,
+			testTemplate.Resource,
+			testTemplate.DisplayName,
+			testTemplate.Content,
+			testTemplate.Description,
+			testTemplate.Category,
+			testTemplate.Tags,
+			testTemplate.DisplayName,
+			testTemplate.Content,
+			testTemplate.Description,
+			testTemplate.Category,
+			testTemplate.Tags,
+		)
+	}
+	
 	if err != nil {
 		return fmt.Errorf("error inserting test template: %v", err)
 	}
@@ -868,11 +949,22 @@ func testCRUDOperations(db *sql.DB, verbose bool) error {
 
 	// Read
 	var template Template
-	query = `
-	SELECT id, provider, resource, display_name, content, description, category, tags
-	FROM templates
-	WHERE provider = ? AND resource = ?
-	`
+	if isPostgres {
+		// PostgreSQL query
+		query = `
+		SELECT id, provider, resource, display_name, content, description, category, tags
+		FROM templates
+		WHERE provider = $1 AND resource = $2
+		`
+	} else {
+		// SQLite query
+		query = `
+		SELECT id, provider, resource, display_name, content, description, category, tags
+		FROM templates
+		WHERE provider = ? AND resource = ?
+		`
+	}
+	
 	err = db.QueryRow(
 		query,
 		testTemplate.Provider,
@@ -901,11 +993,22 @@ func testCRUDOperations(db *sql.DB, verbose bool) error {
 
 	// Update
 	testTemplate.DisplayName = "Updated Test Resource"
-	query = `
-	UPDATE templates
-	SET display_name = ?
-	WHERE provider = ? AND resource = ?
-	`
+	if isPostgres {
+		// PostgreSQL query
+		query = `
+		UPDATE templates
+		SET display_name = $1
+		WHERE provider = $2 AND resource = $3
+		`
+	} else {
+		// SQLite query
+		query = `
+		UPDATE templates
+		SET display_name = ?
+		WHERE provider = ? AND resource = ?
+		`
+	}
+	
 	_, err = db.Exec(
 		query,
 		testTemplate.DisplayName,
@@ -922,11 +1025,20 @@ func testCRUDOperations(db *sql.DB, verbose bool) error {
 	}
 
 	// Verify update
-	err = db.QueryRow(
-		`SELECT display_name FROM templates WHERE provider = ? AND resource = ?`,
-		testTemplate.Provider,
-		testTemplate.Resource,
-	).Scan(&template.DisplayName)
+	if isPostgres {
+		err = db.QueryRow(
+			`SELECT display_name FROM templates WHERE provider = $1 AND resource = $2`,
+			testTemplate.Provider,
+			testTemplate.Resource,
+		).Scan(&template.DisplayName)
+	} else {
+		err = db.QueryRow(
+			`SELECT display_name FROM templates WHERE provider = ? AND resource = ?`,
+			testTemplate.Provider,
+			testTemplate.Resource,
+		).Scan(&template.DisplayName)
+	}
+	
 	if err != nil {
 		return fmt.Errorf("error verifying update: %v", err)
 	}
@@ -935,10 +1047,20 @@ func testCRUDOperations(db *sql.DB, verbose bool) error {
 	}
 
 	// Delete
-	query = `
-	DELETE FROM templates
-	WHERE provider = ? AND resource = ?
-	`
+	if isPostgres {
+		// PostgreSQL query
+		query = `
+		DELETE FROM templates
+		WHERE provider = $1 AND resource = $2
+		`
+	} else {
+		// SQLite query
+		query = `
+		DELETE FROM templates
+		WHERE provider = ? AND resource = ?
+		`
+	}
+	
 	_, err = db.Exec(
 		query,
 		testTemplate.Provider,
@@ -954,11 +1076,20 @@ func testCRUDOperations(db *sql.DB, verbose bool) error {
 
 	// Verify deletion
 	var count int
-	err = db.QueryRow(
-		`SELECT COUNT(*) FROM templates WHERE provider = ? AND resource = ?`,
-		testTemplate.Provider,
-		testTemplate.Resource,
-	).Scan(&count)
+	if isPostgres {
+		err = db.QueryRow(
+			`SELECT COUNT(*) FROM templates WHERE provider = $1 AND resource = $2`,
+			testTemplate.Provider,
+			testTemplate.Resource,
+		).Scan(&count)
+	} else {
+		err = db.QueryRow(
+			`SELECT COUNT(*) FROM templates WHERE provider = ? AND resource = ?`,
+			testTemplate.Provider,
+			testTemplate.Resource,
+		).Scan(&count)
+	}
+	
 	if err != nil {
 		return fmt.Errorf("error verifying deletion: %v", err)
 	}

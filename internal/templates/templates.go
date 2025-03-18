@@ -77,8 +77,16 @@ func ConnectToDatabase(dbType, dbPath string) (*sql.DB, error) {
 		dbname := getEnv("TOFU_REGISTRY_DB_NAME", "opentofu")
 		sslmode := getEnv("TOFU_REGISTRY_DB_SSLMODE", "disable")
 
+		// Log connection details for debugging (without password)
+		fmt.Printf("Connecting to PostgreSQL: host=%s port=%s user=%s dbname=%s sslmode=%s\n", 
+			host, port, user, dbname, sslmode)
+
+		// Properly escape special characters in password
+		escapedPassword := strings.Replace(password, "'", "\\'", -1)
+		escapedPassword = strings.Replace(escapedPassword, "\"", "\\\"", -1)
+		
 		connStr := fmt.Sprintf("host=%s port=%s user=%s password=%s dbname=%s sslmode=%s",
-			host, port, user, password, dbname, sslmode)
+			host, port, user, escapedPassword, dbname, sslmode)
 		db, err = sql.Open("postgres", connStr)
 		if err != nil {
 			return nil, fmt.Errorf("failed to open PostgreSQL database: %v", err)
